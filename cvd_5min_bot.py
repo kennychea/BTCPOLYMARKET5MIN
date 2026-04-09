@@ -1029,6 +1029,52 @@ def print_paper_summary():
 
 
 # ============================================================================
+# MARKET MAKER — INVENTORY TRACKER
+# ============================================================================
+
+class MMInventory:
+    """Track market maker inventory, fills, and P&L."""
+
+    def __init__(self):
+        self.net_position: int = 0
+        self.cash: float = 0.0
+        self.fills: list = []
+
+    def reset_cycle(self):
+        """Reset for a new market cycle."""
+        self.net_position = 0
+        self.cash = 0.0
+        self.fills = []
+
+    def record_fill(self, side: str, price: float, size: int):
+        """Record a fill. BUY increases position, SELL decreases it."""
+        if side == "BUY":
+            self.net_position += size
+            self.cash -= price * size
+        elif side == "SELL":
+            self.net_position -= size
+            self.cash += price * size
+
+        self.fills.append({
+            "timestamp": time.time(),
+            "side": side,
+            "price": price,
+            "size": size,
+            "net_position_after": self.net_position,
+        })
+
+    def get_pnl(self, mark_price: float) -> float:
+        """P&L = cash + (net_position × mark_price)."""
+        return self.cash + (self.net_position * mark_price)
+
+    def get_fill_count(self) -> tuple:
+        """Returns (total, buys, sells)."""
+        buys = sum(1 for f in self.fills if f["side"] == "BUY")
+        sells = sum(1 for f in self.fills if f["side"] == "SELL")
+        return len(self.fills), buys, sells
+
+
+# ============================================================================
 # HYPERLIQUID HEDGE FUNCTIONS
 # ============================================================================
 
