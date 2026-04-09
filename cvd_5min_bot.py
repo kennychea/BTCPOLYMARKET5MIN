@@ -161,7 +161,8 @@ if HYPER_LIQUID_KEY:
         print(colored(f"⚠️ Hyperliquid init failed: {e}", "yellow"))
         HEDGE_ENABLED = False
 else:
-    print(colored("⚠️ HYPER_LIQUID_KEY not found - hedging disabled", "yellow"))
+    if not PAPER_MODE:
+        print(colored("⚠️ HYPER_LIQUID_KEY not found - hedging disabled", "yellow"))
     HEDGE_ENABLED = False
 
 
@@ -536,6 +537,10 @@ def place_limit_order(token_id: str, side: str, price: float, size: int, neg_ris
 
 def cancel_token_orders(token_id: str):
     """Cancel all open orders for a specific token."""
+    if PAPER_MODE:
+        print(colored(f"   📝 PAPER: Cancel orders (simulated)", "yellow"))
+        return
+
     if clob_client is None:
         return
     try:
