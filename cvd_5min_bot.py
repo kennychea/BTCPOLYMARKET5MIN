@@ -901,6 +901,21 @@ def fill_hyperliquid_hedge(poly_outcome: str) -> tuple:
     If Polymarket outcome is "DOWN" → LONG BTC on HL
     Returns (success, hedge_side, hedge_size_btc, hedge_price)
     """
+    if PAPER_MODE:
+        if poly_outcome.upper() == "UP":
+            hedge_side = "SHORT"
+        else:
+            hedge_side = "LONG"
+        btc_price = 0.0
+        try:
+            ask, bid = hl_ask_bid()
+            btc_price = (ask + bid) / 2 if ask > 0 else 0.0
+        except Exception:
+            pass
+        btc_size = HEDGE_USD * HEDGE_LEVERAGE / btc_price if btc_price > 0 else 0.0
+        print(colored(f"   📝 PAPER HEDGE: {hedge_side} {btc_size:.6f} BTC @ ${btc_price:,.1f}", "yellow"))
+        return True, hedge_side, btc_size, btc_price
+
     if not HEDGE_ENABLED or not hl_exchange:
         return False, "DISABLED", 0, 0
 
@@ -998,6 +1013,10 @@ def fill_hyperliquid_hedge(poly_outcome: str) -> tuple:
 
 def close_hyperliquid_hedge():
     """Close any open Hyperliquid hedge with IOC order. Up to 5 attempts."""
+    if PAPER_MODE:
+        print(colored("   📝 PAPER HEDGE CLOSE (simulated)", "yellow"))
+        return
+
     if not HEDGE_ENABLED or not hl_exchange:
         return
 
