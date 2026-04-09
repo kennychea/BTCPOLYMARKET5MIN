@@ -1075,6 +1075,92 @@ class MMInventory:
 
 
 # ============================================================================
+# MARKET MAKER — PAPER FILL SIMULATION
+# ============================================================================
+
+def check_mm_paper_fills(book: dict, our_bid: float, our_ask: float,
+                         bid_size: int, ask_size: int) -> list:
+    """
+    Simulate MM fills in paper mode by comparing our quotes vs real orderbook.
+
+    If real best_ask ≤ our bid → someone sold into our bid (we buy).
+    If real best_bid ≥ our ask → someone bought from our ask (we sell).
+
+    Returns list of fill dicts: [{"side": str, "price": float, "size": int}]
+    """
+    fills = []
+
+    if bid_size > 0 and our_bid > 0 and book["best_ask"] <= our_bid:
+        fills.append({"side": "BUY", "price": our_bid, "size": bid_size})
+
+    if ask_size > 0 and our_ask > 0 and book["best_bid"] >= our_ask:
+        fills.append({"side": "SELL", "price": our_ask, "size": ask_size})
+
+    return fills
+
+
+# ============================================================================
+# MARKET MAKER — LOGGING
+# ============================================================================
+
+def log_mm_fill(market_ts: int, market_slug: str, side: str, price: float,
+                size: int, inventory_after: int, cvd_skew: float,
+                signal_type: str):
+    """Log a market maker fill to CSV."""
+    os.makedirs(DATA_DIR, exist_ok=True)
+
+    new_row = pd.DataFrame([{
+        "timestamp": datetime.now().isoformat(),
+        "market_ts": market_ts,
+        "market_slug": market_slug,
+        "side": side,
+        "price": round(price, 4),
+        "size": size,
+        "inventory_after": inventory_after,
+        "cvd_skew": round(cvd_skew, 4),
+        "signal_type": signal_type,
+    }])
+
+    if os.path.exists(MM_LOG_FILE):
+        existing = pd.read_csv(MM_LOG_FILE)
+        df = pd.concat([existing, new_row], ignore_index=True)
+    else:
+        df = new_row
+
+    df.to_csv(MM_LOG_FILE, index=False)
+
+
+def print_mm_summary():
+    """Print market maker P&L summary."""
+    if not os.path.exists(MM_LOG_FILE):
+        print(colored("   📊 No MM trades yet", "yellow"))
+        return
+
+    df = pd.read_csv(MM_LOG_FILE)
+    if len(df) == 0:
+        print(colored("   📊 MM log empty", "yellow"))
+        return
+
+    buys = df[df["side"] == "BUY"]
+    sells = df[df["side"] == "SELL"]
+
+    total_bought = (buys["price"] * buys["size"]).sum() if len(buys) > 0 else 0
+    total_sold = (sells["price"] * sells["size"]).sum() if len(sells) > 0 else 0
+    realized_pnl = total_sold - total_bought
+
+    print(colored(f"\n   📊 Market Maker Summary:", "cyan", attrs=["bold"]))
+    print(colored(f"      Fills: {len(df)} ({len(buys)} buys, {len(sells)} sells)", "white"))
+    print(colored(f"      Total bought: ${total_bought:.2f} | Total sold: ${total_sold:.2f}", "white"))
+    pnl_color = "green" if realized_pnl >= 0 else "red"
+    print(colored(f"      Realized P&L: ${realized_pnl:.4f}", pnl_color, attrs=["bold"]))
+
+    if len(buys) > 0:
+        print(colored(f"      Avg buy price:  ${buys['price'].mean():.4f}", "white"))
+    if len(sells) > 0:
+        print(colored(f"      Avg sell price: ${sells['price'].mean():.4f}", "white"))
+
+
+# ============================================================================
 # HYPERLIQUID HEDGE FUNCTIONS
 # ============================================================================
 
