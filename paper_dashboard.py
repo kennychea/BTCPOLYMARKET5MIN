@@ -16,6 +16,7 @@ from termcolor import colored
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(SCRIPT_DIR, "data")
 PAPER_LOG_FILE = os.path.join(DATA_DIR, "paper_trades.csv")
+MM_LOG_FILE = os.path.join(DATA_DIR, "mm_paper_trades.csv")
 REFRESH_INTERVAL = 5
 
 
@@ -155,7 +156,59 @@ def render_dashboard():
                 print(colored(f"  Signal rate: ~{signals_per_hour:.1f}/hour", "white"))
         print()
 
+    render_mm_panel()
+
     print(colored("  Press Ctrl+C to exit.", "yellow"))
+
+
+def render_mm_panel():
+    """Render market maker stats panel (only if MM data exists)."""
+    if not os.path.exists(MM_LOG_FILE):
+        return
+
+    try:
+        df = pd.read_csv(MM_LOG_FILE)
+    except Exception:
+        return
+
+    if len(df) == 0:
+        return
+
+    print(colored("  ── MARKET MAKER STATS ────────────────────────────────", "magenta", attrs=["bold"]))
+
+    buys = df[df["side"] == "BUY"]
+    sells = df[df["side"] == "SELL"]
+
+    total_bought = (buys["price"] * buys["size"]).sum() if len(buys) > 0 else 0
+    total_sold = (sells["price"] * sells["size"]).sum() if len(sells) > 0 else 0
+    realized_pnl = total_sold - total_bought
+
+    print(colored(f"  Fills: {len(df)} ({len(buys)} buys, {len(sells)} sells)", "white"))
+    pnl_color = "green" if realized_pnl >= 0 else "red"
+    print(colored(f"  Realized P&L: ${realized_pnl:.4f}", pnl_color, attrs=["bold"]))
+
+    if len(buys) > 0:
+        print(colored(f"  Avg buy:  ${buys['price'].mean():.4f}", "white"))
+    if len(sells) > 0:
+        print(colored(f"  Avg sell: ${sells['price'].mean():.4f}", "white"))
+    if len(buys) > 0 and len(sells) > 0:
+        avg_spread = sells["price"].mean() - buys["price"].mean()
+        print(colored(f"  Avg spread captured: ${avg_spread:.4f}", "cyan"))
+
+    # Last 5 fills
+    print(colored("\n  Recent fills:", "white"))
+    recent = df.tail(5).iloc[::-1]
+    for _, row in recent.iterrows():
+        ts = str(row["timestamp"])[11:19]
+        side = row["side"]
+        emoji = "🟢" if side == "BUY" else "🔴"
+        clr = "green" if side == "BUY" else "red"
+        print(colored(
+            f"  {ts}  {emoji} {side:<4} {int(row['size'])} @ ${row['price']:.4f} "
+            f"| inv: {int(row['inventory_after'])} | skew: {row['cvd_skew']:+.4f}",
+            clr,
+        ))
+    print()
 
 
 def main():
