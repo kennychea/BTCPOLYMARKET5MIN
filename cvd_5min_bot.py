@@ -1360,6 +1360,9 @@ class CVDStinkBot:
                         self.stink_bid_shares, "", 0, 0, "TIME_EXPIRED",
                         "Market ended before fill",
                     )
+                # Resolve paper outcome
+                if PAPER_MODE and self.signal_fired:
+                    resolve_paper_outcome(market_ts, self.feed)
                 break
 
             # Too little time left, cancel stink bid
@@ -1459,6 +1462,18 @@ class CVDStinkBot:
 
                     # Place the stink bid
                     self.place_stink_bid()
+
+                    # Log paper signal for outcome tracking
+                    if PAPER_MODE:
+                        log_paper_signal(
+                            market_ts=market_ts,
+                            signal_type=self.signal_type,
+                            direction=self.signal_direction,
+                            detail=self.signal_detail,
+                            stink_price=self.stink_bid_price,
+                            btc_price_at_signal=self.feed.get_last_price(),
+                            market_slug=self.market_info.get("slug", ""),
+                        )
                 else:
                     mins = time_remaining // 60
                     secs = time_remaining % 60
@@ -1530,6 +1545,8 @@ def main():
 
     # Print trade summary
     print_trade_summary()
+    if PAPER_MODE:
+        print_paper_summary()
 
     # Start Binance CVD feed
     feed = BinanceCVDFeed()
