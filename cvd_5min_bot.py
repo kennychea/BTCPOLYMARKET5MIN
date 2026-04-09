@@ -1708,6 +1708,273 @@ class CVDStinkBot:
 
 
 # ============================================================================
+# CVD MARKET MAKER CLASS
+# ============================================================================
+
+class CVDMarketMaker:
+    """
+    Market maker for BTC 5-min markets, biased by CVD signals.
+
+    Posts two-sided quotes (bid + ask) on the UP token.
+    CVD signal shifts the midpoint. Inventory level adjusts skew.
+    Zero maker fees + 20% rebate = structural edge.
+    """
+
+    def __init__(self, feed: BinanceCVDFeed):
+        self.feed = feed
+        self.inventory = MMInventory()
+        self.current_market_ts: int | None = None
+        self.market_info: dict | None = None
+        self.up_token_id: str | None = None
+        self.down_token_id: str | None = None
+        self.current_bid: float = 0.0
+        self.current_ask: float = 0.0
+        self.current_bid_size: int = 0
+        self.current_ask_size: int = 0
+        self.current_cvd_skew: float = 0.0
+        self.current_signal_type: str = "NEUTRAL"
+        self.bid_order_id: str | None = None
+        self.ask_order_id: str | None = None
+        self.cycle_fills: int = 0
+
+    def reset(self):
+        """Reset state for next market cycle."""
+        self.current_market_ts = None
+        self.market_info = None
+        self.up_token_id = None
+        self.down_token_id = None
+        self.current_bid = 0.0
+        self.current_ask = 0.0
+        self.current_bid_size = 0
+        self.current_ask_size = 0
+        self.current_cvd_skew = 0.0
+        self.current_signal_type = "NEUTRAL"
+        self.bid_order_id = None
+        self.ask_order_id = None
+        self.inventory.reset_cycle()
+        self.cycle_fills = 0
+
+    def compute_cvd_skew(self) -> tuple:
+        """
+        Get CVD signal for the primary timeframe and convert to a price skew.
+
+        Returns (skew_value: float, signal_type: str)
+        - Positive skew = bullish (shift quotes up)
+        - Negative skew = bearish (shift quotes down)
+        """
+        trades = self.feed.get_trades_since(CVD_PRIMARY_TF)
+        if len(trades) < 10:
+            return 0.0, "NEUTRAL"
+
+        cvd_val, price_chg, count = compute_volume_cvd(trades)
+        signal_type, _, direction, strength = detect_divergence(price_chg, cvd_val)
+
+        if direction == "UP":
+            skew = (strength / 100.0) * MM_MAX_CVD_SKEW
+        elif direction == "DOWN":
+            skew = -(strength / 100.0) * MM_MAX_CVD_SKEW
+        else:
+            skew = 0.0
+
+        return skew, signal_type
+
+    def cancel_orders(self):
+        """Cancel all MM quotes."""
+        if self.up_token_id and not PAPER_MODE:
+            cancel_token_orders(self.up_token_id)
+
+    def _refresh_quotes(self, book: dict):
+        """Recalculate and post new quotes."""
+        midpoint = (book["best_bid"] + book["best_ask"]) / 2.0
+
+        self.current_cvd_skew, self.current_signal_type = self.compute_cvd_skew()
+
+        quotes = calculate_mm_quotes(
+            midpoint=midpoint,
+            base_spread=MM_BASE_SPREAD,
+            cvd_skew=self.current_cvd_skew,
+            inventory=self.inventory.net_position,
+            max_inventory=MM_MAX_INVENTORY,
+            order_size=MM_ORDER_SIZE,
+        )
+
+        self.current_bid = quotes["bid_price"]
+        self.current_ask = quotes["ask_price"]
+        self.current_bid_size = quotes["bid_size"]
+        self.current_ask_size = quotes["ask_size"]
+
+        # In paper mode, don't place real orders — fills are simulated
+        if not PAPER_MODE:
+            # Cancel existing, post new
+            if self.up_token_id:
+                cancel_token_orders(self.up_token_id)
+
+            neg_risk = self.market_info.get("neg_risk", False) if self.market_info else False
+            if self.current_bid_size > 0:
+                resp = place_limit_order(self.up_token_id, "BUY", self.current_bid,
+                                         self.current_bid_size, neg_risk)
+                self.bid_order_id = resp.get("orderID")
+            if self.current_ask_size > 0:
+                resp = place_limit_order(self.up_token_id, "SELL", self.current_ask,
+                                         self.current_ask_size, neg_risk)
+                self.ask_order_id = resp.get("orderID")
+
+    def _check_paper_fills(self, book: dict):
+        """Check for simulated fills in paper mode."""
+        fills = check_mm_paper_fills(
+            book, self.current_bid, self.current_ask,
+            self.current_bid_size, self.current_ask_size,
+        )
+
+        for fill in fills:
+            self.inventory.record_fill(fill["side"], fill["price"], fill["size"])
+            self.cycle_fills += 1
+
+            market_slug = self.market_info.get("slug", "") if self.market_info else ""
+            log_mm_fill(
+                market_ts=self.current_market_ts,
+                market_slug=market_slug,
+                side=fill["side"],
+                price=fill["price"],
+                size=fill["size"],
+                inventory_after=self.inventory.net_position,
+                cvd_skew=self.current_cvd_skew,
+                signal_type=self.current_signal_type,
+            )
+
+            emoji = "🟢" if fill["side"] == "BUY" else "🔴"
+            print(colored(
+                f"\n   {emoji} MM PAPER FILL: {fill['side']} {fill['size']} shares "
+                f"@ ${fill['price']:.2f} | Inventory: {self.inventory.net_position}",
+                "green" if fill["side"] == "BUY" else "red",
+            ))
+
+    def run_market_cycle(self, market_ts: int):
+        """
+        Run one market making cycle for a 5-minute market.
+
+        Flow:
+          1. Find the market (same as stink bot)
+          2. Main quoting loop:
+             a. Fetch real orderbook (public API, works in paper mode)
+             b. Check for simulated fills (paper) or real fills (live)
+             c. Recalculate quotes with CVD skew + inventory adjustment
+             d. Post/refresh orders (live only)
+             e. Print status line
+          3. On market end: cancel orders, print cycle P&L
+        """
+        self.current_market_ts = market_ts
+        market_dt = datetime.fromtimestamp(market_ts, tz=timezone.utc)
+        market_et = datetime.fromtimestamp(market_ts, tz=ET)
+
+        print(colored(f"\n{'=' * 70}", "magenta"))
+        print(colored("📊 CVD MARKET MAKER CYCLE", "magenta", attrs=["bold"]))
+        print(colored(
+            f"   Market time: {market_et.strftime('%I:%M:%S%p ET')} | "
+            f"{market_dt.strftime('%H:%M:%S UTC')}",
+            "white",
+        ))
+        print(colored(f"{'=' * 70}", "magenta"))
+
+        # Wait briefly for market to be indexed
+        time_remaining = get_time_remaining(market_ts)
+        if time_remaining > MARKET_DURATION - 10:
+            print(colored("   ⏳ Waiting 10s for market index...", "yellow"))
+            time.sleep(10)
+
+        # Find market (up to 5 retries)
+        self.market_info = None
+        for attempt in range(5):
+            self.market_info = get_market_info(market_ts)
+            if self.market_info:
+                break
+            print(colored(f"   🔄 Retry {attempt + 1}/5 in 2s...", "yellow"))
+            time.sleep(2)
+
+        if not self.market_info:
+            print(colored("   ❌ Could not find market, skipping cycle", "red"))
+            return
+
+        self.up_token_id = self.market_info["up_token_id"]
+        self.down_token_id = self.market_info["down_token_id"]
+        market_slug = self.market_info.get("slug", "")
+        print(colored(f"   🔗 Market: https://polymarket.com/event/{market_slug}", "cyan", attrs=["bold"]))
+
+        # Main quoting loop
+        while True:
+            time_remaining = get_time_remaining(market_ts)
+
+            # Market ended
+            if time_remaining <= 0:
+                print(colored(f"\n   🔴 Market ended!", "yellow"))
+                self.cancel_orders()
+
+                # Calculate final cycle P&L
+                mark_price = 0.50
+                book = get_order_book(self.up_token_id)
+                if book:
+                    mark_price = (book["best_bid"] + book["best_ask"]) / 2.0
+
+                pnl = self.inventory.get_pnl(mark_price)
+                total, buys, sells = self.inventory.get_fill_count()
+                pnl_color = "green" if pnl >= 0 else "red"
+                print(colored(
+                    f"   📊 Cycle P&L: ${pnl:.4f} | Fills: {total} ({buys}B/{sells}S) | "
+                    f"Final inventory: {self.inventory.net_position}",
+                    pnl_color, attrs=["bold"],
+                ))
+                break
+
+            # Stop quoting near market end
+            if time_remaining < MM_STOP_QUOTING_SEC:
+                self.cancel_orders()
+                mins = time_remaining // 60
+                secs = time_remaining % 60
+                print(colored(
+                    f"\r   ⏳ Quoting stopped, waiting for market end... "
+                    f"{mins}:{secs:02d}   ",
+                    "yellow",
+                ), end="", flush=True)
+                time.sleep(2)
+                continue
+
+            # Get real orderbook (public API — works in paper mode)
+            book = get_order_book(self.up_token_id)
+            if not book:
+                print(colored("   ⚠️ No orderbook, retrying...", "yellow"))
+                time.sleep(5)
+                continue
+
+            # Check for paper fills BEFORE refreshing (uses previous quotes)
+            if PAPER_MODE and self.current_bid > 0:
+                self._check_paper_fills(book)
+
+            # Refresh quotes (recalculate with updated inventory + CVD)
+            self._refresh_quotes(book)
+
+            # Print status line
+            mins = time_remaining // 60
+            secs = time_remaining % 60
+            btc_price = self.feed.get_last_price()
+            total, buys, sells = self.inventory.get_fill_count()
+            pnl = self.inventory.get_pnl((book["best_bid"] + book["best_ask"]) / 2.0)
+
+            skew_arrow = "↑" if self.current_cvd_skew > 0.001 else (
+                "↓" if self.current_cvd_skew < -0.001 else "→"
+            )
+            print(colored(
+                f"\r   📊 BID ${self.current_bid:.2f} | ASK ${self.current_ask:.2f} | "
+                f"Sprd ${self.current_ask - self.current_bid:.2f} | "
+                f"CVD {skew_arrow} | Inv: {self.inventory.net_position} | "
+                f"Fills: {total} | P&L: ${pnl:+.4f} | "
+                f"BTC ${btc_price:,.0f} | {mins}:{secs:02d}   ",
+                "white",
+            ), end="", flush=True)
+
+            time.sleep(MM_REFRESH_INTERVAL)
+
+
+# ============================================================================
 # MAIN ENTRY
 # ============================================================================
 
