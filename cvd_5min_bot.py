@@ -827,6 +827,121 @@ def print_trade_summary():
 
 
 # ============================================================================
+# PAPER TRADING LOGGING + OUTCOME CHECKER
+# ============================================================================
+
+def log_paper_signal(market_ts: int, signal_type: str, direction: str, detail: str,
+                     stink_price: float, btc_price_at_signal: float, market_slug: str):
+    """Log paper trade signal for later outcome resolution."""
+    os.makedirs(DATA_DIR, exist_ok=True)
+
+    new_row = pd.DataFrame([{
+        "timestamp": datetime.now().isoformat(),
+        "market_ts": market_ts,
+        "market_slug": market_slug,
+        "signal_type": signal_type,
+        "direction": direction,
+        "detail": detail,
+        "stink_price": round(stink_price, 4),
+        "btc_price_at_signal": round(btc_price_at_signal, 2),
+        "btc_price_at_close": 0.0,
+        "market_outcome": "",
+        "signal_correct": "",
+        "price_change_pct": 0.0,
+    }])
+
+    if os.path.exists(PAPER_LOG_FILE):
+        existing = pd.read_csv(PAPER_LOG_FILE)
+        df = pd.concat([existing, new_row], ignore_index=True)
+    else:
+        df = new_row
+
+    df.to_csv(PAPER_LOG_FILE, index=False)
+    print(colored("   📝 Paper signal logged", "green"))
+
+
+def resolve_paper_outcome(market_ts: int, feed: BinanceCVDFeed):
+    """
+    After a market cycle ends, check BTC price now vs at signal time.
+    Update the paper log with the actual outcome.
+    """
+    if not os.path.exists(PAPER_LOG_FILE):
+        return
+
+    df = pd.read_csv(PAPER_LOG_FILE)
+    mask = (df["market_ts"] == market_ts) & (df["market_outcome"] == "")
+    if not mask.any():
+        return
+
+    btc_now = feed.get_last_price()
+    if btc_now <= 0:
+        return
+
+    for idx in df[mask].index:
+        btc_at_signal = df.loc[idx, "btc_price_at_signal"]
+        if btc_at_signal <= 0:
+            continue
+
+        price_change = ((btc_now - btc_at_signal) / btc_at_signal) * 100
+        actual_outcome = "UP" if btc_now > btc_at_signal else "DOWN"
+        predicted = df.loc[idx, "direction"]
+        correct = "YES" if predicted == actual_outcome else "NO"
+
+        df.loc[idx, "btc_price_at_close"] = round(btc_now, 2)
+        df.loc[idx, "market_outcome"] = actual_outcome
+        df.loc[idx, "signal_correct"] = correct
+        df.loc[idx, "price_change_pct"] = round(price_change, 4)
+
+        emoji = "✅" if correct == "YES" else "❌"
+        print(colored(
+            f"   {emoji} PAPER RESULT: Predicted {predicted} | Actual {actual_outcome} | "
+            f"BTC {btc_at_signal:,.1f} → {btc_now:,.1f} ({price_change:+.3f}%)",
+            "green" if correct == "YES" else "red",
+        ))
+
+    df.to_csv(PAPER_LOG_FILE, index=False)
+
+
+def print_paper_summary():
+    """Print accuracy stats from paper trading log."""
+    if not os.path.exists(PAPER_LOG_FILE):
+        print(colored("   📝 No paper trades yet", "yellow"))
+        return
+
+    df = pd.read_csv(PAPER_LOG_FILE)
+    resolved = df[df["signal_correct"].isin(["YES", "NO"])]
+    if len(resolved) == 0:
+        print(colored(f"   📝 {len(df)} paper signals logged, none resolved yet", "yellow"))
+        return
+
+    total = len(resolved)
+    correct = len(resolved[resolved["signal_correct"] == "YES"])
+    accuracy = (correct / total) * 100
+
+    print(colored(f"\n   📝 Paper Trading Summary:", "cyan", attrs=["bold"]))
+    print(colored(f"      Signals: {total} | Correct: {correct} | Wrong: {total - correct}", "white"))
+    print(colored(f"      Accuracy: {accuracy:.1f}%", "green" if accuracy > 50 else "red", attrs=["bold"]))
+
+    # Breakdown by signal type
+    for sig_type in resolved["signal_type"].unique():
+        subset = resolved[resolved["signal_type"] == sig_type]
+        sub_correct = len(subset[subset["signal_correct"] == "YES"])
+        sub_total = len(subset)
+        sub_acc = (sub_correct / sub_total) * 100 if sub_total > 0 else 0
+        print(colored(f"      {sig_type:<14}: {sub_correct}/{sub_total} ({sub_acc:.0f}%)", "white"))
+
+    # Average price change for correct vs wrong
+    correct_df = resolved[resolved["signal_correct"] == "YES"]
+    wrong_df = resolved[resolved["signal_correct"] == "NO"]
+    if len(correct_df) > 0:
+        avg_correct = correct_df["price_change_pct"].abs().mean()
+        print(colored(f"      Avg move (correct): {avg_correct:.3f}%", "white"))
+    if len(wrong_df) > 0:
+        avg_wrong = wrong_df["price_change_pct"].abs().mean()
+        print(colored(f"      Avg move (wrong):   {avg_wrong:.3f}%", "white"))
+
+
+# ============================================================================
 # HYPERLIQUID HEDGE FUNCTIONS
 # ============================================================================
 
