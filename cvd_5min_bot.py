@@ -445,8 +445,12 @@ def check_cvd_signal(feed: BinanceCVDFeed) -> tuple:
 # POLYMARKET FUNCTIONS (replaces nice_funcs)
 # ============================================================================
 
-def init_clob_client() -> ClobClient:
+def init_clob_client() -> ClobClient | None:
     """Initialize authenticated Polymarket CLOB client."""
+    if PAPER_MODE:
+        print(colored("   📝 PAPER MODE — skipping Polymarket CLOB init", "yellow"))
+        return None
+
     key = os.getenv("PRIVATE_KEY")
     browser_address = os.getenv("PUBLIC_KEY")
     api_key = os.getenv("API_KEY")
@@ -1357,6 +1361,14 @@ def main():
     print(colored(f"      HEDGE_SYMBOL                = {HEDGE_SYMBOL}", "white"))
     print(colored(f"      HEDGE_USD                   = ${HEDGE_USD}", "white"))
     print(colored(f"      HEDGE_LEVERAGE              = {HEDGE_LEVERAGE}x", "white"))
+
+    if PAPER_MODE:
+        print(colored("""
+   ╔══════════════════════════════════════════╗
+   ║  📝 PAPER TRADING MODE — NO REAL ORDERS  ║
+   ║  Signals + outcomes logged for calibration ║
+   ╚══════════════════════════════════════════╝
+        """, "yellow", attrs=["bold"]))
 
     print(colored(f"\n   🔄 Initializing...", "yellow", attrs=["bold"]))
 
