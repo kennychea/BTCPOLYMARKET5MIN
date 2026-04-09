@@ -138,6 +138,7 @@ PAPER_LOG_FILE = os.path.join(DATA_DIR, "paper_trades.csv")
 
 # --- Market Making Strategy ---
 STRATEGY = os.getenv("STRATEGY", "stink")             # "stink" (directional) or "mm" (market making)
+assert STRATEGY in ("stink", "mm"), f"STRATEGY must be 'stink' or 'mm', got '{STRATEGY}'"
 MM_BASE_SPREAD = float(os.getenv("MM_BASE_SPREAD", "0.04"))   # 4-cent base spread
 MM_ORDER_SIZE = int(os.getenv("MM_ORDER_SIZE", "10"))          # shares per side per quote
 MM_MAX_INVENTORY = int(os.getenv("MM_MAX_INVENTORY", "50"))    # max net position (shares)
