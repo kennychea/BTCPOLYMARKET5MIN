@@ -136,6 +136,16 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 TRADE_LOG_FILE = os.path.join(DATA_DIR, "cvd_5min_trades.csv")
 PAPER_LOG_FILE = os.path.join(DATA_DIR, "paper_trades.csv")
 
+# --- Market Making Strategy ---
+STRATEGY = os.getenv("STRATEGY", "stink")             # "stink" (directional) or "mm" (market making)
+MM_BASE_SPREAD = float(os.getenv("MM_BASE_SPREAD", "0.04"))   # 4-cent base spread
+MM_ORDER_SIZE = int(os.getenv("MM_ORDER_SIZE", "10"))          # shares per side per quote
+MM_MAX_INVENTORY = int(os.getenv("MM_MAX_INVENTORY", "50"))    # max net position (shares)
+MM_MAX_CVD_SKEW = float(os.getenv("MM_MAX_CVD_SKEW", "0.02")) # max CVD-derived price shift
+MM_REFRESH_INTERVAL = int(os.getenv("MM_REFRESH_INTERVAL", "10"))  # seconds between quote refreshes
+MM_STOP_QUOTING_SEC = 30                                       # stop quoting N sec before market end
+MM_LOG_FILE = os.path.join(DATA_DIR, "mm_paper_trades.csv")
+
 # ET timezone (UTC-5)
 ET = timezone(timedelta(hours=-5))
 
