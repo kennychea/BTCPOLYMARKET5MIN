@@ -1,0 +1,636 @@
+Data Sources - Polymarket Bot
+Skip to main content
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#content-area
+Generated 
+Mar 4, 2026
+https://github.com/joicodev/polymarket-bot/commit/88855d85758ec6c68e9fe1e7b4450620c388c60e
+ by 
+https://mintlify.com/?utm_campaign=atlas_referral&utm_medium=joicodev-polymarket-bot-81&utm_source=atlas_powered_by
+ | Auto-generate your docs now 
+Claim this site
+https://dashboard.mintlify.com/atlas/claim?atlas_deployment_id=69a701f1444831e14103d587&utm_campaign=atlas_referral&utm_medium=joicodev-polymarket-bot-81&utm_source=atlas_claim
+Polymarket Bot home page Polymarket Bot
+https://mintlify.com/joicodev/polymarket-bot
+Search...
+Ctrl K Ask AI
+joicodev/polymarket-bot 1
+https://github.com/joicodev/polymarket-bot
+joicodev/polymarket-bot 1
+https://github.com/joicodev/polymarket-bot
+Search...
+Navigation
+Core Concepts
+Data Sources
+Documentation
+https://mintlify.com/joicodev/polymarket-bot
+Technical Reference
+https://mintlify.com/joicodev/polymarket-bot/engine/overview
+Get Started
+Introduction
+https://mintlify.com/joicodev/polymarket-bot
+Quickstart
+https://mintlify.com/joicodev/polymarket-bot/quickstart
+Installation
+https://mintlify.com/joicodev/polymarket-bot/installation
+Core Concepts
+System Architecture
+https://mintlify.com/joicodev/polymarket-bot/concepts/overview
+How Predictions Work
+https://mintlify.com/joicodev/polymarket-bot/concepts/how-predictions-work
+Data Sources
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources
+Risk Management
+https://mintlify.com/joicodev/polymarket-bot/concepts/risk-management
+Abstention System
+https://mintlify.com/joicodev/polymarket-bot/concepts/abstention-system
+Configuration
+Configuration Reference
+https://mintlify.com/joicodev/polymarket-bot/configuration/config-reference
+Tuning Parameters
+https://mintlify.com/joicodev/polymarket-bot/configuration/tuning-parameters
+Environment Setup
+https://mintlify.com/joicodev/polymarket-bot/configuration/environment-setup
+Guides
+Reading Console Output
+https://mintlify.com/joicodev/polymarket-bot/guides/reading-output
+Understanding Daily Reports
+https://mintlify.com/joicodev/polymarket-bot/guides/daily-reports
+Troubleshooting
+https://mintlify.com/joicodev/polymarket-bot/guides/troubleshooting
+Powered by Mintlify
+Auto-generate your docs
+Start now
+On this page
+Overview
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#overview
+Chainlink WebSocket Feed
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#chainlink-websocket-feed
+Connection Details
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#connection-details
+Implementation
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#implementation
+Data Validation
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#data-validation
+Reconnection Logic
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#reconnection-logic
+Vatic Trading API
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#vatic-trading-api
+Endpoint
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#endpoint
+Implementation
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#implementation-2
+Caching Strategy
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#caching-strategy
+Polymarket Gamma API
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#polymarket-gamma-api
+Market Discovery
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#market-discovery
+Implementation
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#implementation-3
+Fallback Offsets
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#fallback-offsets
+Rate Limiting
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#rate-limiting
+Polymarket CLOB API
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#polymarket-clob-api
+Market Price Endpoint
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#market-price-endpoint
+Implementation
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#implementation-4
+Polling Strategy
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#polling-strategy
+Expected Value Calculation
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#expected-value-calculation
+Formula
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#formula
+Implementation
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#implementation-5
+Example
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#example
+Data Flow Timeline
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#data-flow-timeline
+Data Quality Checks
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#data-quality-checks
+Configuration
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#configuration
+Next Steps
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#next-steps
+Core Concepts
+Data Sources
+Chainlink WebSocket, Vatic API, Polymarket Gamma/CLOB integration details
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#overview
+ Overview
+The prediction engine aggregates data from four independent sources:
+Chainlink WebSocket
+Live BTC/USD price stream (1-second frequency)
+Vatic Trading API
+Strike prices for 5-minute intervals
+Polymarket Gamma
+Market discovery and metadata
+Polymarket CLOB
+Live market prices (implied probabilities)
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#chainlink-websocket-feed
+ Chainlink WebSocket Feed
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#connection-details
+ Connection Details
+Endpoint
+: 
+wss://ws-live-data.polymarket.com
+ 
+Subscription Message
+:
+{
+  "action": "subscribe",
+  "subscriptions": [
+    {
+      "topic": "crypto_prices_chainlink",
+      "type": "*",
+      "filters": "{\"symbol\": \"btc/usd\"}"
+    }
+  ]
+}
+
+Response Format
+:
+{
+  "topic": "crypto_prices_chainlink",
+  "payload": {
+    "symbol": "btc/usd",
+    "value": "64232.02",
+    "timestamp": 1709571234567
+  }
+}
+
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#implementation
+ Implementation
+From 
+src/feeds/chainlink.js:79-117
+ :
+export class ChainlinkFeed {
+  constructor({ onTick, onStatus }) {
+    this._onTick = onTick
+    this._onStatus = onStatus
+    this._ws = null
+    this._reconnectTimer = null
+    this._running = false
+    this._lastValidPrice = null
+  }
+
+  start() {
+    if (this._running) return
+    this._running = true
+    this._connect()
+  }
+
+  _connect() {
+    this._ws = new WebSocket('wss://ws-live-data.polymarket.com')
+
+    this._ws.on('open', () => {
+      this._onStatus('connected')
+      this._ws.send(SUBSCRIPTION_MSG)
+    })
+
+    this._ws.on('message', (msg) => {
+      const data = JSON.parse(msg.toString())
+      if (data.topic !== 'crypto_prices_chainlink') return
+      if (data.payload.symbol !== 'btc/usd') return
+
+      const price = Number(data.payload.value)
+
+      // Validation (see below)
+      if (!this._validateTick(price)) return
+
+      this._onTick({ timestamp: Date.now(), price })
+    })
+
+    this._ws.on('close', () => {
+      this._ws = null
+      if (!this._running) return
+
+      this._onStatus('reconnecting')
+      this._reconnectTimer = setTimeout(() => {
+        if (this._running) this._connect()
+      }, 3000)  // RECONNECT_DELAY_MS
+    })
+  }
+}
+
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#data-validation
+ Data Validation
+Two guards protect against bad data: 
+1. NaN / Zero Guard
+if (!Number.isFinite(price) || price <= 0) {
+  logger.warn('Invalid tick rejected', { price, reason: 'not finite or <= 0' })
+  return
+}
+
+2. Spike Filter (10% threshold)
+const spikeThreshold = config.feeds.chainlink.spikeThreshold  // 0.10
+if (this._lastValidPrice !== null && 
+    Math.abs(price / this._lastValidPrice - 1) > spikeThreshold) {
+  logger.warn('Spike tick rejected', {
+    price,
+    lastPrice: this._lastValidPrice,
+    deviation: ((price / this._lastValidPrice - 1) * 100).toFixed(2) + '%'
+  })
+  return
+}
+this._lastValidPrice = price
+
+This prevents:
+Oracle glitches (e.g., price reported as 0 or NaN)
+Flash crash artifacts (10%+ instant moves)
+Data corruption in transit
+The spike filter can reject legitimate moves during extreme volatility. For BTC, a 10% move in 1 second is exceedingly rare but possible. Adjust 
+feeds.chainlink.spikeThreshold
+ if needed.
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#reconnection-logic
+ Reconnection Logic
+When the WebSocket disconnects:
+Close event fires → set status to 'reconnecting'
+Wait 3 seconds (configurable delay)
+Attempt reconnection via 
+_connect()
+Repeat indefinitely while 
+_running = true
+Graceful shutdown:
+stop() {
+  this._running = false
+  if (this._reconnectTimer) clearTimeout(this._reconnectTimer)
+  if (this._ws) {
+    this._ws.removeAllListeners()
+    this._ws.close()
+  }
+  this._onStatus('disconnected')
+}
+
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#vatic-trading-api
+ Vatic Trading API
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#endpoint
+ Endpoint
+Base URL
+: 
+https://api.vatic.trading/api/v1/targets/timestamp
+ 
+Query Parameters
+:
+asset=btc
+type=5min
+timestamp={epoch}
+ (Unix seconds, aligned to 5-min boundary)
+Example Request
+:
+curl "https://api.vatic.trading/api/v1/targets/timestamp?asset=btc&type=5min&timestamp=1709571300"
+
+Response Format
+:
+{
+  "target_price": 64355.45,
+  "timestamp": 1709571300,
+  "asset": "btc",
+  "interval": "5min"
+}
+
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#implementation-2
+ Implementation
+From 
+src/feeds/vatic.js:14-41
+ :
+export function getCurrent5mTimestamp() {
+  const nowSec = Math.floor(Date.now() / 1000)
+  return Math.floor(nowSec / 300) * 300  // Align to 5-min boundary
+}
+
+export async function fetchStrikePrice(epochTimestamp) {
+  const url = `${VATIC_BASE}?asset=btc&type=5min&timestamp=${epochTimestamp}`
+  const res = await fetch(url)
+
+  if (!res.ok) {
+    throw new Error(`Vatic API HTTP ${res.status} ${res.statusText}`)
+  }
+
+  const json = await res.json()
+  const strikePrice = json.target_price ?? json.target ?? json.price ?? null
+
+  return { strikePrice, rawData: json }
+}
+
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#caching-strategy
+ Caching Strategy
+Strike prices are cached per epoch in 
+src/index.js:68-96
+ :
+let cachedStrike = { epoch: null, price: null, rawData: null }
+
+// Fetch only when epoch changes
+if (epochTs !== cachedStrike.epoch) {
+  try {
+    const result = await fetchStrikePrice(epochTs)
+    cachedStrike = { epoch: epochTs, price: result.strikePrice, rawData: result.rawData }
+  } catch (e) {
+    logger.warn('Vatic strike fetch failed', { epoch: epochTs, error: e.message })
+  }
+}
+const strikePrice = cachedStrike.price
+
+This reduces API calls from 300/interval (once per second) to 1/interval (once per epoch).
+Vatic API typically updates strike prices 10-30 seconds before the interval starts. If fetching too early (e.g., T-290s), the API may return the previous interval's strike.
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#polymarket-gamma-api
+ Polymarket Gamma API
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#market-discovery
+ Market Discovery
+Base URL
+: 
+https://gamma-api.polymarket.com
+ 
+Endpoint
+: 
+/events?slug={slug}
+ 
+Slug Pattern
+: 
+btc-updown-5m-{epochTimestamp}
+ Example: 
+btc-updown-5m-1709571300
+ for the 5-minute market starting at epoch 1709571300.
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#implementation-3
+ Implementation
+From 
+src/feeds/polymarket.js:47-98
+ :
+export async function discoverActiveMarket(epochTimestamp) {
+  const slugs = [
+    SLUG_PREFIX + epochTimestamp,
+    ...OFFSETS_FALLBACK.map(offset => SLUG_PREFIX + (epochTimestamp + offset)),
+  ]
+  // slugs = ['btc-updown-5m-1709571300', 'btc-updown-5m-1709571000', 'btc-updown-5m-1709571600']
+
+  for (const slug of slugs) {
+    const url = `${GAMMA_BASE}/events?slug=${slug}`
+    const res = await _throttledFetch(url)  // Rate-limited
+
+    if (!res.ok) continue
+
+    const data = await res.json()
+    if (!data || data.length === 0) continue
+
+    const event = data[0]
+    const market = event.markets?.[0]
+    if (!market) continue
+
+    const tokenIds = JSON.parse(market.clobTokenIds || '[]')
+    const outcomes = JSON.parse(market.outcomes || '[]')
+
+    // Determine which token is "Up" vs "Down"
+    const upIndex = outcomes.indexOf('Up')
+    const downIndex = outcomes.indexOf('Down')
+
+    if (upIndex === -1 || downIndex === -1 || tokenIds.length < 2) {
+      logger.warn('Unexpected market structure', { outcomes, tokenIds: tokenIds.length, slug })
+      continue
+    }
+
+    return {
+      found: true,
+      conditionId: market.conditionId,
+      upTokenId: tokenIds[upIndex],
+      downTokenId: tokenIds[downIndex],
+      outcomePrices: JSON.parse(market.outcomePrices || '[]').map(Number),
+      slug,
+    }
+  }
+
+  return { found: false }
+}
+
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#fallback-offsets
+ Fallback Offsets
+If the primary slug returns no results, the engine tries adjacent epochs (±300s):
+{
+  "feeds": {
+    "polymarket": {
+      "offsetsFallback": [-300, 300]
+    }
+  }
+}
+
+This handles:
+Clock skew between local time and Polymarket servers
+Markets created early/late
+Slug naming inconsistencies
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#rate-limiting
+ Rate Limiting
+Gamma API requests are throttled to 1 request per second:
+let _lastRequestTime = 0
+const MIN_INTERVAL_MS = 1000
+
+async function _throttledFetch(url) {
+  const now = Date.now()
+  const elapsed = now - _lastRequestTime
+  if (elapsed < MIN_INTERVAL_MS) {
+    await new Promise(r => setTimeout(r, MIN_INTERVAL_MS - elapsed))
+  }
+  _lastRequestTime = Date.now()
+  return fetch(url)
+}
+
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#polymarket-clob-api
+ Polymarket CLOB API
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#market-price-endpoint
+ Market Price Endpoint
+Base URL
+: 
+https://clob.polymarket.com
+ 
+Endpoint
+: 
+/price?token_id={tokenId}&side=BUY
+ 
+Example Request
+:
+curl "https://clob.polymarket.com/price?token_id=0x1234...&side=BUY"
+
+Response Format
+:
+{
+  "price": "0.1523",
+  "token_id": "0x1234..."
+}
+
+The 
+price
+ field represents the market's implied probability of the “Up” outcome.
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#implementation-4
+ Implementation
+From 
+src/feeds/polymarket.js:109-132
+ :
+export async function getMarketPrice(tokenId) {
+  try {
+    const url = `${CLOB_BASE}/price?token_id=${tokenId}&side=BUY`
+    const res = await _throttledFetch(url)
+
+    if (!res.ok) {
+      logger.warn('CLOB price non-OK response', { status: res.status, tokenId })
+      return null
+    }
+
+    const data = await res.json()
+    const price = parseFloat(data.price)
+
+    // Guard: reject degenerate values
+    if (!Number.isFinite(price) || price <= 0 || price >= 1) {
+      return null
+    }
+
+    return price
+  } catch (e) {
+    logger.warn('CLOB price fetch error', { tokenId, error: e.message })
+    return null
+  }
+}
+
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#polling-strategy
+ Polling Strategy
+Market prices are polled every 5 seconds (configurable via 
+feeds.polymarket.pollIntervalSec
+ ):
+const polyPollSec = config.feeds?.polymarket?.pollIntervalSec ?? 5
+let cachedQMarket = { value: null, lastFetchSec: 0 }
+
+// Poll price every polyPollSec
+if (cachedMarket.data && (nowSec - cachedQMarket.lastFetchSec) >= polyPollSec) {
+  const price = await getMarketPrice(cachedMarket.data.upTokenId)
+  if (price != null) {
+    cachedQMarket = { value: price, lastFetchSec: nowSec }
+  }
+}
+
+Why not use the 
+/book
+ endpoint? The order book can contain stale orders that don't reflect current market conditions. The 
+/price
+ endpoint returns the best executable price.
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#expected-value-calculation
+ Expected Value Calculation
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#formula
+ Formula
+Comparing model probability 
+p
+ against market probability 
+q
+ :
+EV(YES) = p/q - 1
+EV(NO)  = (1-p)/(1-q) - 1
+
+Margin = |p - q| / max(p, 1-p)
+Edge   = p - q
+
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#implementation-5
+ Implementation
+From 
+src/feeds/polymarket.js:151-161
+ :
+export function calculateEV(p, q) {
+  if (q <= 0 || q >= 1 || p <= 0 || p >= 1) return null
+
+  const evYes = p / q - 1
+  const evNo = (1 - p) / (1 - q) - 1
+  const margin = Math.abs(p - q) / Math.max(p, 1 - p)
+  const bestSide = evYes > evNo ? 'YES' : 'NO'
+  const bestEV = Math.max(evYes, evNo)
+
+  return { evYes, evNo, margin, bestSide, bestEV, ev: bestEV, edge: p - q }
+}
+
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#example
+ Example
+// Model predicts 85% UP, market prices UP at 10%
+const ev = calculateEV(0.85, 0.10)
+
+/*
+evYes = 0.85 / 0.10 - 1 = 7.50  (+750% EV on YES bet)
+evNo  = (1-0.85) / (1-0.10) - 1 = 0.15/0.90 - 1 = -0.833  (-83% EV on NO bet)
+margin = |0.85 - 0.10| / max(0.85, 0.15) = 0.75 / 0.85 = 0.88  (88% safety margin)
+edge = 0.85 - 0.10 = 0.75  (75pp edge)
+bestSide = 'YES'
+bestEV = 7.50
+*/
+
+Extreme EV values (> 5.00) often indicate:
+Stale market prices
+Low liquidity (wide spreads)
+Oracle delays
+Model miscalibration
+Always verify market conditions before trading high-EV opportunities.
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#data-flow-timeline
+ Data Flow Timeline
+Engine CLOB API Gamma API Vatic API Chainlink WS Engine CLOB API Gamma API Vatic API Chainlink WS T = 0s (Interval Start) T = 1s - 295s (Monitoring Phase) loop [Every second] loop [Every 5 seconds] T = 296s - 300s (Near Expiry) T = 300s (Interval Close) Fetch strike price (cached) Discover market (cached) BTC price tick Update EWMA volatility Buffer momentum data Fetch market price q Calculate EV(p, q) Decide trade/abstain Final price ticks Disable momentum adjustments Pure Black-Scholes only Record outcome Update Platt calibration Update drawdown tracker Persist to history.json
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#data-quality-checks
+ Data Quality Checks
+Chainlink WebSocket
+NaN / zero guard
+10% spike filter
+Auto-reconnect on disconnect
+Frame-level JSON parsing errors logged
+Vatic API
+HTTP status check (reject non-2xx)
+Epoch alignment verification
+Multiple field fallbacks ( 
+target_price
+ || 
+target
+ || 
+price
+ )
+Per-epoch caching prevents redundant requests
+Polymarket Gamma
+Fallback slug offsets (±300s)
+Market structure validation (requires upIndex, downIndex)
+Token ID array bounds check
+Rate limiting (1 req/sec)
+Polymarket CLOB
+Price bounds check (0 < q < 1)
+Finite number validation
+5-second polling cadence
+Error logs for failed fetches (non-blocking)
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#configuration
+ Configuration
+{
+  "feeds": {
+    "chainlink": {
+      "spikeThreshold": 0.10
+    },
+    "polymarket": {
+      "gammaBaseUrl": "https://gamma-api.polymarket.com",
+      "clobBaseUrl": "https://clob.polymarket.com",
+      "slugPrefix": "btc-updown-5m-",
+      "pollIntervalSec": 5,
+      "offsetsFallback": [-300, 300],
+      "enabled": true
+    }
+  }
+}
+
+https://mintlify.com/joicodev/polymarket-bot/concepts/data-sources#next-steps
+ Next Steps
+[
+How Predictions Work
+Understand how raw data becomes calibrated probabilities](https://mintlify.com/joicodev/polymarket-bot/concepts/how-predictions-work)
+[
+Risk Management
+Learn how bet sizing and drawdown tracking work](https://mintlify.com/joicodev/polymarket-bot/concepts/risk-management)
+How Predictions Work Previous
+https://mintlify.com/joicodev/polymarket-bot/concepts/how-predictions-work
+Risk Management Next
+https://mintlify.com/joicodev/polymarket-bot/concepts/risk-management
+Ctrl+I
+Build docs developers (and LLMs) love
+Get started for free
+https://dashboard.mintlify.com/signup?utm_campaign=atlas_referral&utm_medium=joicodev-polymarket-bot-81&utm_source=atlas_signup
+ 
+Talk to us
+https://www.mintlify.com/contact/sales?utm_campaign=atlas_referral&utm_medium=joicodev-polymarket-bot-81&utm_source=atlas_sales
+x
+Assistant
+Responses are generated using AI and may contain mistakes.

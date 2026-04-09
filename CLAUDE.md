@@ -90,6 +90,9 @@ Skills locales dans `.claude/skills/` (projet-local, pas global). Invoquer autom
 - **`trading-safety-review`** : Avant tout merge de code touchant `strategies/`, `execution/`, `risk/`, ou `core/safety.py`. Revue de securite obligatoire.
 - **`backtest-before-deploy`** : Avant de declarer une strategie prete. Gate obligatoire : backtest passe avec metriques acceptables.
 - **`market-data-debug`** : Quand un probleme de donnees de prix est suspecte. Diagnostic systematique des feeds.
+- **`polymarket-bot-architecture`** : Reference architecture complete du bot (APIs, endpoints, EV formula, cycle 300s). Consulter pour toute question sur le fonctionnement du bot.
+- **`api-connection-pattern`** : Patterns de connexion Python pour les 4 APIs (Chainlink WS, Vatic REST, Gamma REST, CLOB REST). Consulter avant de coder un feed.
+- **`trading-cycle-implementation`** : Implementation du cycle 300s (4 phases). Consulter avant de toucher a engine.py ou la boucle principale.
 
 ### Workflow Skill Creator
 
