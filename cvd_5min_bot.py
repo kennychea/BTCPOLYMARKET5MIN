@@ -102,7 +102,6 @@ REQUIRE_CONFIRMATION = True
 
 # --- Paper Trading Mode ---
 PAPER_MODE = os.getenv("PAPER_MODE", "true").lower() == "true"
-PAPER_LOG_FILE = os.path.join(DATA_DIR, "paper_trades.csv")
 
 # --- Stink Bid / Order Parameters ---
 PULLBACK_PCT = 0.03                   # 3% below current ask for stink entry
@@ -135,6 +134,7 @@ CLOB_HOST = "https://clob.polymarket.com"
 # --- Files ---
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 TRADE_LOG_FILE = os.path.join(DATA_DIR, "cvd_5min_trades.csv")
+PAPER_LOG_FILE = os.path.join(DATA_DIR, "paper_trades.csv")
 
 # ET timezone (UTC-5)
 ET = timezone(timedelta(hours=-5))
@@ -874,6 +874,8 @@ def resolve_paper_outcome(market_ts: int, feed: BinanceCVDFeed):
         return
 
     df = pd.read_csv(PAPER_LOG_FILE)
+    df["market_outcome"] = df["market_outcome"].fillna("")
+    df["signal_correct"] = df["signal_correct"].fillna("")
     mask = (df["market_ts"] == market_ts) & (df["market_outcome"] == "")
     if not mask.any():
         return
