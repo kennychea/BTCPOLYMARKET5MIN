@@ -364,6 +364,73 @@ def detect_divergence(price_change: float, cvd_value: float) -> tuple:
     return ("NEUTRAL", "NEUTRAL", "FLAT", 0)
 
 
+def calculate_mm_quotes(
+    midpoint: float,
+    base_spread: float,
+    cvd_skew: float,
+    inventory: int,
+    max_inventory: int,
+    order_size: int,
+    tick_size: float = 0.01,
+) -> dict:
+    """
+    Calculate market maker bid/ask prices with CVD and inventory skew.
+
+    Args:
+        midpoint: Current orderbook midpoint price.
+        base_spread: Base spread width (e.g., 0.04 = 4 cents).
+        cvd_skew: CVD-derived price shift. Positive = bullish (shift up).
+        inventory: Current net position in shares (positive = long UP).
+        max_inventory: Maximum allowed net position.
+        order_size: Shares per side.
+        tick_size: Minimum price increment (default 0.01 for BTC markets).
+
+    Returns:
+        {"bid_price": float, "ask_price": float, "bid_size": int, "ask_size": int}
+    """
+    half_spread = base_spread / 2.0
+
+    # Shift midpoint by CVD signal
+    adjusted_mid = midpoint + cvd_skew
+
+    # Inventory skew: penalize the overloaded side
+    # Long inventory → lower mid → lower bid/ask → encourage sells, discourage buys
+    # Skew is quantized to tick_size so it always produces a visible price shift.
+    if max_inventory > 0:
+        inv_ratio = inventory / max_inventory  # range: -1 to +1
+        # Scale: full inventory → shift by base_spread; quantize to whole ticks
+        raw_skew = inv_ratio * base_spread
+        inv_skew = round(raw_skew / tick_size) * tick_size
+        adjusted_mid -= inv_skew
+
+    # Calculate raw prices
+    bid_price = adjusted_mid - half_spread
+    ask_price = adjusted_mid + half_spread
+
+    # Round both prices to nearest tick
+    bid_price = round(round(bid_price / tick_size) * tick_size, 2)
+    ask_price = round(round(ask_price / tick_size) * tick_size, 2)
+
+    # Ensure minimum spread of 1 tick (push ask up if needed)
+    if ask_price - bid_price < tick_size:
+        ask_price = round(bid_price + tick_size, 2)
+
+    # Clamp to valid range [0.01, 0.99]
+    bid_price = max(0.01, min(0.99, bid_price))
+    ask_price = max(0.01, min(0.99, ask_price))
+
+    # Size: full size unless at inventory limit
+    bid_size = order_size if inventory < max_inventory else 0
+    ask_size = order_size if inventory > -max_inventory else 0
+
+    return {
+        "bid_price": bid_price,
+        "ask_price": ask_price,
+        "bid_size": bid_size,
+        "ask_size": ask_size,
+    }
+
+
 def check_cvd_signal(feed: BinanceCVDFeed) -> tuple:
     """
     Check CVD across intraday timeframes for a trade signal.
