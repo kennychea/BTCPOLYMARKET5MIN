@@ -407,17 +407,20 @@ def calculate_mm_quotes(
     bid_price = adjusted_mid - half_spread
     ask_price = adjusted_mid + half_spread
 
-    # Round both prices to nearest tick
-    bid_price = round(round(bid_price / tick_size) * tick_size, 2)
-    ask_price = round(round(ask_price / tick_size) * tick_size, 2)
+    # Round to tick: floor for bid (conservative buy), ceil for ask (conservative sell)
+    bid_price = round(math.floor(bid_price / tick_size) * tick_size, 2)
+    ask_price = round(math.ceil(ask_price / tick_size) * tick_size, 2)
 
-    # Ensure minimum spread of 1 tick (push ask up if needed)
-    if ask_price - bid_price < tick_size:
-        ask_price = round(bid_price + tick_size, 2)
-
-    # Clamp to valid range [0.01, 0.99]
+    # Clamp to valid range [0.01, 0.99] BEFORE enforcing min spread
     bid_price = max(0.01, min(0.99, bid_price))
     ask_price = max(0.01, min(0.99, ask_price))
+
+    # Enforce minimum spread of 1 tick AFTER clamping (push bid down at upper bound)
+    if ask_price - bid_price < tick_size:
+        if bid_price > 0.01:
+            bid_price = round(ask_price - tick_size, 2)
+        else:
+            ask_price = round(bid_price + tick_size, 2)
 
     # Size: full size unless at inventory limit
     bid_size = order_size if inventory < max_inventory else 0
