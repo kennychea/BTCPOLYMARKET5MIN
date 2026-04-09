@@ -1754,7 +1754,7 @@ class CVDMarketMaker:
         self.inventory.reset_cycle()
         self.cycle_fills = 0
 
-    def compute_cvd_skew(self) -> tuple:
+    def compute_cvd_skew(self) -> tuple[float, str]:
         """
         Get CVD signal for the primary timeframe and convert to a price skew.
 
@@ -1909,8 +1909,8 @@ class CVDMarketMaker:
                 print(colored(f"\n   🔴 Market ended!", "yellow"))
                 self.cancel_orders()
 
-                # Calculate final cycle P&L
-                mark_price = 0.50
+                # Calculate final cycle P&L using last known midpoint
+                mark_price = (self.current_bid + self.current_ask) / 2.0 if self.current_bid > 0 else 0.50
                 book = get_order_book(self.up_token_id)
                 if book:
                     mark_price = (book["best_bid"] + book["best_ask"]) / 2.0
