@@ -85,7 +85,7 @@ Ce projet utilise le plugin superpowers. Les skills sont invoquees automatiqueme
 
 ### Custom Skills (projet-specifiques)
 
-Skills locales dans `~/.claude/skills/`. Invoquer automatiquement :
+Skills locales dans `.claude/skills/` (projet-local, pas global). Invoquer automatiquement :
 
 - **`trading-safety-review`** : Avant tout merge de code touchant `strategies/`, `execution/`, `risk/`, ou `core/safety.py`. Revue de securite obligatoire.
 - **`backtest-before-deploy`** : Avant de declarer une strategie prete. Gate obligatoire : backtest passe avec metriques acceptables.
@@ -96,7 +96,7 @@ Skills locales dans `~/.claude/skills/`. Invoquer automatiquement :
 Pour creer de nouvelles skills :
 1. Identifier le besoin (pattern repete, erreur recurrente, workflow specifique)
 2. Invoquer `/skill-creator` pour structurer la skill
-3. Placer dans `~/.claude/skills/<skill-name>/SKILL.md`
+3. Placer dans `.claude/skills/<skill-name>/SKILL.md` (projet-local)
 4. Tester avec des subagents avant activation
 5. Documenter dans cette section
 

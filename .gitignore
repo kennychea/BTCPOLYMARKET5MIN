@@ -1,31 +1,104 @@
+# === Project-specific ===
+
 # Worktrees (superpowers)
 .worktrees/
 
-# Environment
+# Environment (keep .env.example)
 .env
 .env.local
 .env.production
 !.env.example
 
-# Python
-__pycache__/
-*.pyc
-.venv/
-venv/
-
-# Data (large, recorded market data)
+# Market data (large files)
 data/raw/
 data/processed/
 
-# IDE
+# === Python standard ===
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[codz]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py.cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# Translations
+*.mo
+*.pot
+
+# Environments
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Ruff
+.ruff_cache/
+
+# pytype
+.pytype/
+
+# Cython debug symbols
+cython_debug/
+
+# PEP 582
+__pypackages__/
+
+# === IDE ===
 .vscode/
 .idea/
 
-# Distribution
-dist/
-build/
-*.egg-info/
-
-# OS
+# === OS ===
 .DS_Store
 Thumbs.db
