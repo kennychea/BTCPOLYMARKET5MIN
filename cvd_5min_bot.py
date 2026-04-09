@@ -493,6 +493,11 @@ clob_client: ClobClient | None = None
 
 def place_limit_order(token_id: str, side: str, price: float, size: int, neg_risk: bool = False) -> dict:
     """Place a limit order on Polymarket CLOB."""
+    if PAPER_MODE:
+        fake_id = f"PAPER-{int(time.time() * 1000)}"
+        print(colored(f"   📝 PAPER ORDER: {side} {size} shares @ ${price:.4f} | Token: {str(token_id)[:20]}...", "yellow"))
+        return {"orderID": fake_id, "paper": True}
+
     if clob_client is None:
         print(colored("❌ CLOB client not initialized!", "red"))
         return {}
@@ -566,6 +571,9 @@ def get_all_positions() -> dict:
 
 def check_poly_filled(token_id: str) -> bool:
     """Check if we have a filled position for this token."""
+    if PAPER_MODE:
+        return True  # Simulate instant fill in paper mode
+
     try:
         open_orders = clob_client.get_orders() if clob_client else []
         if not open_orders:
