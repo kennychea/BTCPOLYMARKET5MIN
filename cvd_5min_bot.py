@@ -2005,6 +2005,16 @@ def main():
     print(colored(f"      HEDGE_USD                   = ${HEDGE_USD}", "white"))
     print(colored(f"      HEDGE_LEVERAGE              = {HEDGE_LEVERAGE}x", "white"))
 
+    if STRATEGY == "mm":
+        print(colored(f"\n   📊 Market Making Configuration:", "magenta", attrs=["bold"]))
+        print(colored(f"      STRATEGY                = {STRATEGY}", "white"))
+        print(colored(f"      MM_BASE_SPREAD          = ${MM_BASE_SPREAD}", "white"))
+        print(colored(f"      MM_ORDER_SIZE           = {MM_ORDER_SIZE} shares/side", "white"))
+        print(colored(f"      MM_MAX_INVENTORY        = {MM_MAX_INVENTORY} shares", "white"))
+        print(colored(f"      MM_MAX_CVD_SKEW         = ${MM_MAX_CVD_SKEW}", "white"))
+        print(colored(f"      MM_REFRESH_INTERVAL     = {MM_REFRESH_INTERVAL}s", "white"))
+        print(colored(f"      MM_STOP_QUOTING_SEC     = {MM_STOP_QUOTING_SEC}s", "white"))
+
     if PAPER_MODE:
         print(colored("""
    ╔══════════════════════════════════════════╗
@@ -2033,6 +2043,8 @@ def main():
     print_trade_summary()
     if PAPER_MODE:
         print_paper_summary()
+    if STRATEGY == "mm":
+        print_mm_summary()
 
     # Start Binance CVD feed
     feed = BinanceCVDFeed()
@@ -2048,11 +2060,15 @@ def main():
     else:
         print(colored("   ⚠️ No trades received yet, feed may be connecting...", "yellow"))
 
-    print(colored(f"\n   👁️ Watching BTC order flow for divergences and momentum...", "white"))
+    if STRATEGY == "mm":
+        bot = CVDMarketMaker(feed)
+        print(colored(f"\n   📊 Market Maker active — posting two-sided quotes with CVD bias", "magenta", attrs=["bold"]))
+    else:
+        bot = CVDStinkBot(feed)
+        print(colored(f"\n   👁️ Watching BTC order flow for divergences and momentum...", "white"))
+
     print(colored(f"      Press Ctrl+C to stop.", "yellow"))
     print(colored(f"{'=' * 70}\n", "green"))
-
-    bot = CVDStinkBot(feed)
 
     while True:
         try:
@@ -2081,7 +2097,7 @@ def main():
             print(colored("🌙 CVD Bot stopped!", "yellow", attrs=["bold"]))
             print(colored(f"{'=' * 70}", "yellow"))
             bot.cancel_orders()
-            if HEDGE_ENABLED:
+            if STRATEGY != "mm" and HEDGE_ENABLED:
                 pos = hl_get_position()
                 if pos:
                     print(colored("   ⚠️ Open HL hedge - close manually or restart.", "yellow"))

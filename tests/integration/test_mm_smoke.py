@@ -60,3 +60,28 @@ class TestCVDMarketMakerCreation:
         mm = bot.CVDMarketMaker(feed)
         mm.up_token_id = "fake-token"
         mm.cancel_orders()  # should not crash in paper mode
+
+
+class TestStrategyMode:
+    def test_strategy_default_is_stink(self):
+        """Default strategy should be 'stink'."""
+        assert bot.STRATEGY in ("stink", "mm")
+
+    def test_mm_and_stink_share_interface(self):
+        """Both bot classes have reset() and run_market_cycle()."""
+        feed = bot.BinanceCVDFeed(max_trades=100)
+        stink = bot.CVDStinkBot(feed)
+        mm = bot.CVDMarketMaker(feed)
+
+        assert hasattr(stink, "reset") and callable(stink.reset)
+        assert hasattr(stink, "run_market_cycle") and callable(stink.run_market_cycle)
+        assert hasattr(mm, "reset") and callable(mm.reset)
+        assert hasattr(mm, "run_market_cycle") and callable(mm.run_market_cycle)
+
+    def test_both_bots_have_cancel_orders(self):
+        """Both bot classes have cancel_orders()."""
+        feed = bot.BinanceCVDFeed(max_trades=100)
+        stink = bot.CVDStinkBot(feed)
+        mm = bot.CVDMarketMaker(feed)
+        assert hasattr(stink, "cancel_orders") and callable(stink.cancel_orders)
+        assert hasattr(mm, "cancel_orders") and callable(mm.cancel_orders)
