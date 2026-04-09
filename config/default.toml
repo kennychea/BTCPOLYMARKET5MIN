@@ -1,0 +1,25 @@
+[general]
+log_level = "INFO"
+log_format = "json"
+
+[feeds]
+chainlink_reconnect_delay_s = 1.0
+chainlink_max_reconnect_delay_s = 30.0
+vatic_poll_interval_s = 5.0
+gamma_cache_ttl_s = 60.0
+
+[execution]
+max_order_retries = 3
+order_timeout_s = 5.0
+
+[risk]
+max_position_usdc = 100.0
+max_daily_loss_usdc = 50.0
+kill_switch_drawdown_pct = 15.0
+circuit_breaker_errors = 5
+circuit_breaker_window_s = 60.0
+circuit_breaker_pause_s = 300.0
+
+[backtesting]
+default_data_dir = "data/raw"
+output_dir = "data/processed"

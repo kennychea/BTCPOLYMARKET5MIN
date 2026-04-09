@@ -1,0 +1,31 @@
+# Worktrees (superpowers)
+.worktrees/
+
+# Environment
+.env
+.env.local
+.env.production
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Data (large, recorded market data)
+data/raw/
+data/processed/
+
+# IDE
+.vscode/
+.idea/
+
+# Distribution
+dist/
+build/
+*.egg-info/
+
+# OS
+.DS_Store
+Thumbs.db
