@@ -83,6 +83,23 @@ class TestEvaluate:
         assert status.status == "CONTINUE"
         assert status.n == 0
 
+    def test_string_false_filled_does_not_count(self):
+        """CSV round-trip can produce `filled` as the string "False".
+        Ensure _is_filled treats it as unfilled (not truthy like bool(str)).
+        """
+        df = _df([_row(signal_correct="YES", filled="False") for _ in range(40)])
+        status = paper_gate.evaluate(df)
+        assert status.status == "CONTINUE"
+        assert status.n == 0
+
+    def test_string_true_filled_counts(self):
+        """Symmetric check: CSV string "True" must count as filled."""
+        rows = [dict(_row(signal_correct="YES"), filled="True") for _ in range(10)]
+        rows += [dict(_row(signal_correct="NO"), filled="True") for _ in range(20)]
+        status = paper_gate.evaluate(_df(rows))
+        assert status.status == "KILL"
+        assert status.n == 30
+
     def test_only_pending_trades_continues(self):
         df = _df([_row(signal_correct="PENDING", filled=True) for _ in range(40)])
         status = paper_gate.evaluate(df)
@@ -130,8 +147,9 @@ class TestEvaluate:
         assert status.p_value < 0.05
         assert status.ev_per_trade >= 0.20
 
-    def test_inconclusive_ev_too_low(self):
-        # n=60, wins=35, winrate=0.583, p≈0.10 → INCONCLUSIVE (p>0.05)
+    def test_inconclusive_p_value_too_high(self):
+        # n=60, wins=35, winrate=0.583, p≈0.123 > 0.05 → INCONCLUSIVE
+        # (EV ≈ $0.65 is above threshold; p-value is what fails)
         rows = [_row(signal_correct="YES", stink_price=0.50) for _ in range(35)]
         rows += [_row(signal_correct="NO", stink_price=0.50) for _ in range(25)]
         status = paper_gate.evaluate(_df(rows))

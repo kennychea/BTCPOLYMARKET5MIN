@@ -10,6 +10,7 @@ Gate thresholds are frozen by the design spec
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from math import comb
@@ -75,8 +76,20 @@ def evaluate(df: pd.DataFrame) -> GateStatus:
         return GateStatus("CONTINUE", "no trades logged yet",
                           0, 0.0, 1.0, 0.0, _now_iso())
 
+    # Robust filled check: handles bool, 0/1, and CSV-roundtrip strings like
+    # "True"/"False"/"true"/"false". `astype(bool)` is unsafe because
+    # bool("False") == True for any non-empty string.
+    def _is_filled(v) -> bool:
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, (int, float)):
+            return bool(v)
+        if isinstance(v, str):
+            return v.strip().lower() in ("true", "1", "yes")
+        return False
+
     settled = df[
-        df["filled"].astype(bool) &
+        df["filled"].apply(_is_filled) &
         df["signal_correct_polymarket"].isin(["YES", "NO"])
     ]
     n = len(settled)
@@ -127,7 +140,6 @@ def evaluate(df: pd.DataFrame) -> GateStatus:
 
 def write_sentinel(status: GateStatus, path: str = SENTINEL_PATH) -> None:
     """Write the gate status to a JSON sentinel file. Overwrites existing."""
-    import os
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w") as f:
         json.dump(asdict(status), f, indent=2)
