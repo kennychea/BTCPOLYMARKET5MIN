@@ -2316,6 +2316,12 @@ def main():
         print(colored(f"      MM_REFRESH_INTERVAL     = {MM_REFRESH_INTERVAL}s", "white"))
         print(colored(f"      MM_STOP_QUOTING_SEC     = {MM_STOP_QUOTING_SEC}s", "white"))
 
+    # Stink paper validation harness state
+    if STRATEGY == "stink":
+        flip_state = "ACTIVE — signals will be flipped" if CVD_INVERT_SIGNAL else "inactive"
+        print(colored(f"\n   🔁 CVD_INVERT_SIGNAL       = {CVD_INVERT_SIGNAL} ({flip_state})",
+                      "magenta" if CVD_INVERT_SIGNAL else "white"), flush=True)
+
     if PAPER_MODE:
         print(colored("""
    ╔══════════════════════════════════════════╗
@@ -2328,6 +2334,27 @@ def main():
 
     # Initialize Polymarket CLOB client
     clob_client = init_clob_client()
+
+    # Paper validation gate — refuse to start if prior run left a KILL sentinel
+    if STRATEGY == "stink" and PAPER_MODE:
+        import paper_gate
+        prior = paper_gate.read_sentinel()
+        if prior is not None and prior.status == "KILL":
+            print(colored(
+                f"\n   🛑 REFUSING TO START — previous paper_gate status = KILL\n"
+                f"      Reason: {prior.reason}\n"
+                f"      n={prior.n}, winrate={prior.winrate:.1%}, evaluated_at={prior.evaluated_at}\n"
+                f"      Delete {paper_gate.SENTINEL_PATH} to override, or archive the strategy.",
+                "red", attrs=["bold"],
+            ), flush=True)
+            return
+        if prior is not None and prior.status in ("PASS", "INCONCLUSIVE"):
+            print(colored(
+                f"\n   ℹ️ Previous paper_gate status = {prior.status} "
+                f"(n={prior.n}, winrate={prior.winrate:.1%}). "
+                f"Starting a new accumulation session.",
+                "cyan",
+            ), flush=True)
 
     # Check for existing HL positions
     if HEDGE_ENABLED:
@@ -2392,6 +2419,30 @@ def main():
 
             bot.reset()
             bot.run_market_cycle(market_ts)
+
+            # Paper validation gate — evaluate after every cycle
+            if STRATEGY == "stink" and PAPER_MODE:
+                import paper_gate
+                if os.path.exists(PAPER_LOG_FILE):
+                    gate_df = pd.read_csv(PAPER_LOG_FILE)
+                    status = paper_gate.evaluate(gate_df)
+                    paper_gate.write_sentinel(status)
+                    if status.status in ("PASS", "KILL", "INCONCLUSIVE"):
+                        banner_color = {"PASS": "green", "KILL": "red",
+                                        "INCONCLUSIVE": "yellow"}[status.status]
+                        print(colored(
+                            f"\n{'=' * 70}\n"
+                            f"   🎯 PAPER GATE TERMINAL: {status.status}\n"
+                            f"   Reason: {status.reason}\n"
+                            f"   n={status.n} | winrate={status.winrate:.1%} | "
+                            f"p={status.p_value:.4f} | EV/trade=${status.ev_per_trade:.2f}\n"
+                            f"   Sentinel written to {paper_gate.SENTINEL_PATH}\n"
+                            f"{'=' * 70}\n",
+                            banner_color, attrs=["bold"],
+                        ), flush=True)
+                        bot.cancel_orders()
+                        feed.stop()
+                        return
 
         except KeyboardInterrupt:
             print(colored(f"\n\n{'=' * 70}", "yellow"))
