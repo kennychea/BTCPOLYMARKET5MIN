@@ -1801,7 +1801,7 @@ class CVDMarketMaker:
 
     Posts two-sided quotes (bid + ask) on the UP token.
     CVD signal shifts the midpoint. Inventory level adjusts skew.
-    Zero maker fees + 20% rebate = structural edge.
+    Zero maker fees + 0.5% maker rebate capture = small structural edge.
     """
 
     def __init__(self, feed: BinanceCVDFeed):
@@ -1882,7 +1882,7 @@ class CVDMarketMaker:
         self.current_cvd_skew, self.current_signal_type = self.compute_cvd_skew()
 
         if MM_NEUTRAL_ONLY and self.current_signal_type != "NEUTRAL":
-            print(f"[MM] Non-NEUTRAL signal ({self.current_signal_type}) — quotes disabled by MM_NEUTRAL_ONLY")
+            print(f"[MM] Non-NEUTRAL signal ({self.current_signal_type}) — quotes disabled by MM_NEUTRAL_ONLY", flush=True)
             self.current_bid = 0.0
             self.current_ask = 0.0
             self.current_bid_size = 0

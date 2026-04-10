@@ -157,7 +157,10 @@ class TestMmNeutralOnlyGate:
         monkeypatch.setattr(mm, "compute_cvd_skew", lambda: (0.01, "BEARISH_DIV"))
         book = {"best_bid": 0.49, "best_ask": 0.51, "spread": 0.02}
         mm._refresh_quotes(book)
-        assert mm.current_bid_size > 0 or mm.current_ask_size > 0
+        assert mm.current_bid > 0.0
+        assert mm.current_ask > 0.0
+        assert mm.current_bid_size > 0
+        assert mm.current_ask_size > 0
 
     def test_gate_enabled_skips_non_neutral(self, monkeypatch):
         """MM_NEUTRAL_ONLY=True + non-NEUTRAL signal → sizes forced to 0, early return."""
@@ -176,4 +179,7 @@ class TestMmNeutralOnlyGate:
         monkeypatch.setattr(mm, "compute_cvd_skew", lambda: (0.0, "NEUTRAL"))
         book = {"best_bid": 0.49, "best_ask": 0.51, "spread": 0.02}
         mm._refresh_quotes(book)
-        assert mm.current_bid_size > 0 or mm.current_ask_size > 0
+        assert mm.current_bid > 0.0
+        assert mm.current_ask > 0.0
+        assert mm.current_bid_size > 0
+        assert mm.current_ask_size > 0
