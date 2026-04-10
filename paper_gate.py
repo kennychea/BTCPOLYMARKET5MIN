@@ -106,7 +106,7 @@ def evaluate(df: pd.DataFrame) -> GateStatus:
     if n >= KILL_N and winrate < KILL_WINRATE:
         return GateStatus(
             "KILL",
-            f"n={n} ≥ {KILL_N} AND winrate={winrate:.1%} < {KILL_WINRATE:.0%}",
+            f"n={n} >= {KILL_N} AND winrate={winrate:.1%} < {KILL_WINRATE:.0%}",
             n, winrate, p_value, ev, _now_iso(),
         )
 
