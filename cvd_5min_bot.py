@@ -46,6 +46,10 @@ import eth_account
 from dotenv import load_dotenv
 from termcolor import colored
 
+# Stink paper validation harness modules (pure logic, no side effects at import)
+import paper_gate
+import truth_sources
+
 # Load environment variables
 load_dotenv()
 
@@ -990,8 +994,6 @@ def resolve_paper_outcome(market_ts: int, feed: BinanceCVDFeed, filled: bool = F
     gate); filled=False keeps the row in the log but excludes it from
     the gate via paper_gate.evaluate().
     """
-    import truth_sources
-
     if not os.path.exists(PAPER_LOG_FILE):
         return
 
@@ -2335,20 +2337,23 @@ def main():
     # Initialize Polymarket CLOB client
     clob_client = init_clob_client()
 
-    # Paper validation gate — refuse to start if prior run left a KILL sentinel
-    if STRATEGY == "stink" and PAPER_MODE:
-        import paper_gate
+    # Paper validation gate — refuse to start if prior run left a KILL sentinel.
+    # This check runs in BOTH paper and live mode: a KILL sentinel means the
+    # strategy is proven broken on paper, so it must also halt live trading.
+    # (Defense in depth per CLAUDE.md §Money Is Real.)
+    if STRATEGY == "stink":
         prior = paper_gate.read_sentinel()
         if prior is not None and prior.status == "KILL":
+            mode_tag = "PAPER" if PAPER_MODE else "LIVE"
             print(colored(
-                f"\n   🛑 REFUSING TO START — previous paper_gate status = KILL\n"
+                f"\n   🛑 REFUSING TO START ({mode_tag}) — previous paper_gate status = KILL\n"
                 f"      Reason: {prior.reason}\n"
                 f"      n={prior.n}, winrate={prior.winrate:.1%}, evaluated_at={prior.evaluated_at}\n"
                 f"      Delete {paper_gate.SENTINEL_PATH} to override, or archive the strategy.",
                 "red", attrs=["bold"],
             ), flush=True)
             return
-        if prior is not None and prior.status in ("PASS", "INCONCLUSIVE"):
+        if PAPER_MODE and prior is not None and prior.status in ("PASS", "INCONCLUSIVE"):
             print(colored(
                 f"\n   ℹ️ Previous paper_gate status = {prior.status} "
                 f"(n={prior.n}, winrate={prior.winrate:.1%}). "
@@ -2422,7 +2427,6 @@ def main():
 
             # Paper validation gate — evaluate after every cycle
             if STRATEGY == "stink" and PAPER_MODE:
-                import paper_gate
                 if os.path.exists(PAPER_LOG_FILE):
                     gate_df = pd.read_csv(PAPER_LOG_FILE)
                     status = paper_gate.evaluate(gate_df)

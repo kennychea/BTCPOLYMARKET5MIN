@@ -92,6 +92,18 @@ class TestEvaluate:
         assert status.status == "CONTINUE"
         assert status.n == 0
 
+    def test_nan_filled_does_not_count(self):
+        """NaN in filled column (from empty CSV cell on float dtype) must be
+        treated as unfilled. bool(float('nan')) == True would silently inflate
+        n on a safety gate.
+        """
+        import numpy as np
+        rows = [dict(_row(signal_correct="YES"), filled=float("nan")) for _ in range(30)]
+        rows += [dict(_row(signal_correct="NO"), filled=float("nan")) for _ in range(10)]
+        status = paper_gate.evaluate(_df(rows))
+        assert status.status == "CONTINUE"
+        assert status.n == 0
+
     def test_string_true_filled_counts(self):
         """Symmetric check: CSV string "True" must count as filled."""
         rows = [dict(_row(signal_correct="YES"), filled="True") for _ in range(10)]

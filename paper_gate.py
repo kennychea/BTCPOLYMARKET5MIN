@@ -10,6 +10,7 @@ Gate thresholds are frozen by the design spec
 from __future__ import annotations
 
 import json
+import math
 import os
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -49,6 +50,24 @@ def one_sided_binomial_p(wins: int, n: int, p: float = 0.5) -> float:
     )
 
 
+def _is_filled(v) -> bool:
+    """Robust check for the `filled` column across bool/int/float/str variants.
+
+    `df["filled"].astype(bool)` is unsafe because bool("False") == True for any
+    non-empty string, and bool(float('nan')) == True — a latent footgun for a
+    safety gate that sees CSV round-trips and column-dtype drift.
+    """
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        if isinstance(v, float) and math.isnan(v):
+            return False
+        return bool(v)
+    if isinstance(v, str):
+        return v.strip().lower() in ("true", "1", "yes")
+    return False
+
+
 def compute_pnl_per_trade(row: pd.Series) -> float:
     """Net PnL for one filled+settled stink trade.
 
@@ -75,18 +94,6 @@ def evaluate(df: pd.DataFrame) -> GateStatus:
     if len(df) == 0:
         return GateStatus("CONTINUE", "no trades logged yet",
                           0, 0.0, 1.0, 0.0, _now_iso())
-
-    # Robust filled check: handles bool, 0/1, and CSV-roundtrip strings like
-    # "True"/"False"/"true"/"false". `astype(bool)` is unsafe because
-    # bool("False") == True for any non-empty string.
-    def _is_filled(v) -> bool:
-        if isinstance(v, bool):
-            return v
-        if isinstance(v, (int, float)):
-            return bool(v)
-        if isinstance(v, str):
-            return v.strip().lower() in ("true", "1", "yes")
-        return False
 
     settled = df[
         df["filled"].apply(_is_filled) &
