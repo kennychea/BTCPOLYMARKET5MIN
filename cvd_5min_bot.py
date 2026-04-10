@@ -143,9 +143,11 @@ MM_BASE_SPREAD = float(os.getenv("MM_BASE_SPREAD", "0.04"))   # 4-cent base spre
 MM_ORDER_SIZE = int(os.getenv("MM_ORDER_SIZE", "10"))          # shares per side per quote
 MM_MAX_INVENTORY = int(os.getenv("MM_MAX_INVENTORY", "50"))    # max net position (shares)
 MM_MAX_CVD_SKEW = float(os.getenv("MM_MAX_CVD_SKEW", "0.02")) # max CVD-derived price shift
+MM_NEUTRAL_ONLY = os.getenv("MM_NEUTRAL_ONLY", "false").lower() == "true"  # gate: skip non-NEUTRAL signals
 MM_REFRESH_INTERVAL = int(os.getenv("MM_REFRESH_INTERVAL", "10"))  # seconds between quote refreshes
 MM_STOP_QUOTING_SEC = 30                                       # stop quoting N sec before market end
 MM_LOG_FILE = os.path.join(DATA_DIR, "mm_paper_trades.csv")
+PAPER_BALANCE = float(os.getenv("PAPER_BALANCE", "500"))    # starting paper portfolio in USDC
 
 # ET timezone (UTC-5)
 ET = timezone(timedelta(hours=-5))
@@ -423,9 +425,9 @@ def calculate_mm_quotes(
         else:
             ask_price = round(bid_price + tick_size, 2)
 
-    # Size: full size unless at inventory limit
-    bid_size = order_size if inventory < max_inventory else 0
-    ask_size = order_size if inventory > -max_inventory else 0
+    # Size: clamp to not exceed max_inventory (prevents overshoot)
+    bid_size = max(0, min(order_size, max_inventory - inventory))
+    ask_size = max(0, min(order_size, max_inventory + inventory))
 
     return {
         "bid_price": bid_price,
@@ -1034,27 +1036,70 @@ def print_paper_summary():
 # ============================================================================
 
 class MMInventory:
-    """Track market maker inventory, fills, and P&L."""
+    """Track market maker inventory, fills, and P&L with fee modeling.
+
+    Polymarket fee structure for makers:
+      - Maker fee: 0% (makers pay nothing)
+      - Maker rebate: ~0.5% of notional (volume-tier dependent, conservative est.)
+    Taker fees only apply when you cross the spread, which MM limit orders don't.
+    We model the conservative maker rebate to avoid overstating edge.
+    """
+
+    MAKER_REBATE_RATE = 0.005  # 0.5% conservative maker rebate
 
     def __init__(self):
         self.net_position: int = 0
         self.cash: float = 0.0
+        self.total_fees: float = 0.0  # total rebates earned (positive)
         self.fills: list = []
 
     def reset_cycle(self):
         """Reset for a new market cycle."""
         self.net_position = 0
         self.cash = 0.0
+        self.total_fees = 0.0
         self.fills = []
 
+    def settle(self, settlement_price: float) -> float:
+        """Apply binary settlement: resolve remaining inventory at $0 or $1.
+
+        Args:
+            settlement_price: 1.0 if UP token wins, 0.0 if DOWN token wins.
+
+        Returns:
+            Settlement cash flow (can be negative for wrong-side inventory).
+        """
+        if self.net_position == 0:
+            return 0.0
+        settlement_cash = self.net_position * settlement_price
+        self.cash += settlement_cash
+        settled_qty = self.net_position
+        self.net_position = 0
+        self.fills.append({
+            "timestamp": time.time(),
+            "side": "SETTLE",
+            "price": settlement_price,
+            "size": abs(settled_qty),
+            "net_position_after": 0,
+            "rebate": 0.0,
+        })
+        return settlement_cash
+
     def record_fill(self, side: str, price: float, size: int):
-        """Record a fill. BUY increases position, SELL decreases it."""
+        """Record a fill with maker rebate applied to cash."""
+        notional = price * size
+        rebate = notional * self.MAKER_REBATE_RATE
+
         if side == "BUY":
             self.net_position += size
-            self.cash -= price * size
+            self.cash -= notional
         elif side == "SELL":
             self.net_position -= size
-            self.cash += price * size
+            self.cash += notional
+
+        # Maker rebate adds to cash regardless of side
+        self.cash += rebate
+        self.total_fees += rebate
 
         self.fills.append({
             "timestamp": time.time(),
@@ -1062,10 +1107,11 @@ class MMInventory:
             "price": price,
             "size": size,
             "net_position_after": self.net_position,
+            "rebate": rebate,
         })
 
     def get_pnl(self, mark_price: float) -> float:
-        """P&L = cash + (net_position × mark_price)."""
+        """P&L = cash + (net_position * mark_price). Cash includes rebates."""
         return self.cash + (self.net_position * mark_price)
 
     def get_fill_count(self) -> tuple:
@@ -1080,24 +1126,61 @@ class MMInventory:
 # ============================================================================
 
 def check_mm_paper_fills(book: dict, our_bid: float, our_ask: float,
-                         bid_size: int, ask_size: int) -> list:
+                         bid_size: int, ask_size: int,
+                         prev_book: dict | None = None) -> list:
     """
-    Simulate MM fills in paper mode by comparing our quotes vs real orderbook.
+    Simulate MM fills in paper mode.
 
-    If real best_ask ≤ our bid → someone sold into our bid (we buy).
-    If real best_bid ≥ our ask → someone bought from our ask (we sell).
+    Two detection methods:
+      1. Direct cross: market snapshot already through our price.
+         Mutual exclusion: if both sides cross (API anomaly), pick the side
+         with the larger adverse move.
+      2. At-the-touch sweep: our quote was at the BBO and the midpoint moved
+         >= 1 tick (0.01) directionally. Only ONE side fills per snapshot.
 
     Returns list of fill dicts: [{"side": str, "price": float, "size": int}]
     """
-    fills = []
+    # Method 1: direct cross — market already through our price
+    buy_cross = bid_size > 0 and our_bid > 0 and book["best_ask"] <= our_bid
+    sell_cross = ask_size > 0 and our_ask > 0 and book["best_bid"] >= our_ask
 
-    if bid_size > 0 and our_bid > 0 and book["best_ask"] <= our_bid:
-        fills.append({"side": "BUY", "price": our_bid, "size": bid_size})
+    if buy_cross and sell_cross:
+        # Crossed book (API anomaly) — pick the side with larger move
+        buy_depth = our_bid - book["best_ask"]
+        sell_depth = book["best_bid"] - our_ask
+        if buy_depth >= sell_depth:
+            return [{"side": "BUY", "price": our_bid, "size": bid_size}]
+        return [{"side": "SELL", "price": our_ask, "size": ask_size}]
 
-    if ask_size > 0 and our_ask > 0 and book["best_bid"] >= our_ask:
-        fills.append({"side": "SELL", "price": our_ask, "size": ask_size})
+    if buy_cross:
+        return [{"side": "BUY", "price": our_bid, "size": bid_size}]
+    if sell_cross:
+        return [{"side": "SELL", "price": our_ask, "size": ask_size}]
 
-    return fills
+    if prev_book is None:
+        return []
+
+    # Method 2: at-the-touch sweep detection.
+    # Require mid to move >= 1 tick (0.01). One side only, direction-gated.
+    prev_mid = (prev_book["best_bid"] + prev_book["best_ask"]) / 2.0
+    curr_mid = (book["best_bid"] + book["best_ask"]) / 2.0
+    mid_move = curr_mid - prev_mid
+
+    if mid_move < -0.01:
+        # Mid dropped → selling pressure → our bid got hit
+        if (bid_size > 0 and our_bid > 0
+                and our_bid >= prev_book["best_bid"]
+                and book["best_bid"] < our_bid):
+            return [{"side": "BUY", "price": our_bid, "size": bid_size}]
+
+    elif mid_move > 0.01:
+        # Mid rose → buying pressure → our ask got lifted
+        if (ask_size > 0 and our_ask > 0
+                and our_ask <= prev_book["best_ask"]
+                and book["best_ask"] > our_ask):
+            return [{"side": "SELL", "price": our_ask, "size": ask_size}]
+
+    return []
 
 
 # ============================================================================
@@ -1737,6 +1820,10 @@ class CVDMarketMaker:
         self.bid_order_id: str | None = None
         self.ask_order_id: str | None = None
         self.cycle_fills: int = 0
+        self.prev_book: dict | None = None
+        self.last_buy_fill_time: float = 0.0
+        self.last_sell_fill_time: float = 0.0
+        self.last_valid_mid: float = 0.50
 
     def reset(self):
         """Reset state for next market cycle."""
@@ -1754,6 +1841,10 @@ class CVDMarketMaker:
         self.ask_order_id = None
         self.inventory.reset_cycle()
         self.cycle_fills = 0
+        self.prev_book = None
+        self.last_buy_fill_time = 0.0
+        self.last_sell_fill_time = 0.0
+        self.last_valid_mid = 0.50
 
     def compute_cvd_skew(self) -> tuple[float, str]:
         """
@@ -1790,6 +1881,14 @@ class CVDMarketMaker:
 
         self.current_cvd_skew, self.current_signal_type = self.compute_cvd_skew()
 
+        if MM_NEUTRAL_ONLY and self.current_signal_type != "NEUTRAL":
+            print(f"[MM] Non-NEUTRAL signal ({self.current_signal_type}) — quotes disabled by MM_NEUTRAL_ONLY")
+            self.current_bid = 0.0
+            self.current_ask = 0.0
+            self.current_bid_size = 0
+            self.current_ask_size = 0
+            return
+
         quotes = calculate_mm_quotes(
             midpoint=midpoint,
             base_spread=MM_BASE_SPREAD,
@@ -1821,13 +1920,31 @@ class CVDMarketMaker:
                 self.ask_order_id = resp.get("orderID")
 
     def _check_paper_fills(self, book: dict):
-        """Check for simulated fills in paper mode."""
+        """Check for simulated fills in paper mode with per-side cooldown."""
         fills = check_mm_paper_fills(
             book, self.current_bid, self.current_ask,
             self.current_bid_size, self.current_ask_size,
+            prev_book=self.prev_book,
         )
 
+        # Per-side cooldown: min 30s between fills on the same side.
+        # A real MM at the BBO doesn't get filled every tick — there's queue
+        # priority and other resting orders absorb flow first.
+        now = time.time()
+        FILL_COOLDOWN = 30  # seconds
+        cooled_fills = []
         for fill in fills:
+            if fill["side"] == "BUY" and (now - self.last_buy_fill_time) < FILL_COOLDOWN:
+                continue
+            if fill["side"] == "SELL" and (now - self.last_sell_fill_time) < FILL_COOLDOWN:
+                continue
+            cooled_fills.append(fill)
+
+        for fill in cooled_fills:
+            if fill["side"] == "BUY":
+                self.last_buy_fill_time = now
+            else:
+                self.last_sell_fill_time = now
             self.inventory.record_fill(fill["side"], fill["price"], fill["size"])
             self.cycle_fills += 1
 
@@ -1901,6 +2018,11 @@ class CVDMarketMaker:
         market_slug = self.market_info.get("slug", "")
         print(colored(f"   🔗 Market: https://polymarket.com/event/{market_slug}", "cyan", attrs=["bold"]))
 
+        # Record BTC price at cycle start for binary settlement
+        btc_start_price = self.feed.get_last_price()
+        if btc_start_price > 0:
+            print(colored(f"   📌 BTC start: ${btc_start_price:,.2f}", "white"))
+
         # Main quoting loop
         while True:
             time_remaining = get_time_remaining(market_ts)
@@ -1910,25 +2032,84 @@ class CVDMarketMaker:
                 print(colored(f"\n   🔴 Market ended!", "yellow"))
                 self.cancel_orders()
 
-                # Calculate final cycle P&L using last known midpoint
-                mark_price = (self.current_bid + self.current_ask) / 2.0 if self.current_bid > 0 else 0.50
-                book = get_order_book(self.up_token_id)
-                if book:
-                    mark_price = (book["best_bid"] + book["best_ask"]) / 2.0
+                # ── Binary settlement ──────────────────────────────────
+                # Determine outcome: BTC up or down since cycle start?
+                btc_end_price = self.feed.get_last_price()
+                pre_settle_inv = self.inventory.net_position
 
-                pnl = self.inventory.get_pnl(mark_price)
+                # Fallback: if feed is down, use last known BTC price
+                if btc_end_price <= 0:
+                    btc_end_price = btc_start_price  # best available fallback
+                if btc_start_price <= 0 and btc_end_price > 0:
+                    btc_start_price = btc_end_price  # edge: feed recovered mid-cycle
+
+                if btc_start_price > 0 and btc_end_price > 0:
+                    outcome = "UP" if btc_end_price > btc_start_price else "DOWN"
+                    settlement_price = 1.0 if outcome == "UP" else 0.0
+                    btc_move = ((btc_end_price - btc_start_price) / btc_start_price) * 100
+
+                    print(colored(
+                        f"   📌 BTC: ${btc_start_price:,.2f} → ${btc_end_price:,.2f} "
+                        f"({btc_move:+.3f}%) → {outcome}",
+                        "green" if outcome == "UP" else "red",
+                    ))
+
+                    # Settle remaining inventory at $0 or $1
+                    if pre_settle_inv != 0:
+                        settle_cash = self.inventory.settle(settlement_price)
+                        market_slug_val = self.market_info.get("slug", "") if self.market_info else ""
+                        log_mm_fill(
+                            market_ts=self.current_market_ts,
+                            market_slug=market_slug_val,
+                            side="SETTLE",
+                            price=settlement_price,
+                            size=abs(pre_settle_inv),
+                            inventory_after=0,
+                            cvd_skew=0.0,
+                            signal_type=outcome,
+                        )
+                        settle_icon = "💰" if settle_cash >= 0 else "💸"
+                        print(colored(
+                            f"   {settle_icon} Settlement: {pre_settle_inv} shares @ "
+                            f"${settlement_price:.0f} ({outcome}) → ${settle_cash:+.4f}",
+                            "green" if settle_cash >= 0 else "red",
+                        ))
+                else:
+                    # Both prices unavailable — settle at DOWN ($0) as conservative default
+                    print(colored("   ⚠️ No BTC price — settling at $0 (conservative)", "yellow"))
+                    if pre_settle_inv != 0:
+                        settlement_price = 0.0
+                        settle_cash = self.inventory.settle(settlement_price)
+                        market_slug_val = self.market_info.get("slug", "") if self.market_info else ""
+                        log_mm_fill(
+                            market_ts=self.current_market_ts,
+                            market_slug=market_slug_val,
+                            side="SETTLE",
+                            price=settlement_price,
+                            size=abs(pre_settle_inv),
+                            inventory_after=0,
+                            cvd_skew=0.0,
+                            signal_type="DOWN",
+                        )
+
+                # Final P&L (after settlement, position should be 0)
+                pnl = self.inventory.get_pnl(0.0)  # net_pos is 0 after settle
                 total, buys, sells = self.inventory.get_fill_count()
                 pnl_color = "green" if pnl >= 0 else "red"
                 print(colored(
                     f"   📊 Cycle P&L: ${pnl:.4f} | Fills: {total} ({buys}B/{sells}S) | "
-                    f"Final inventory: {self.inventory.net_position}",
+                    f"Settled: {pre_settle_inv} → 0",
                     pnl_color, attrs=["bold"],
                 ))
                 break
 
-            # Stop quoting near market end
+            # Stop quoting near market end — still read book for mark-to-market
             if time_remaining < MM_STOP_QUOTING_SEC:
                 self.cancel_orders()
+                # Keep reading orderbook for accurate end-of-cycle mark
+                book_check = get_order_book(self.up_token_id)
+                if book_check:
+                    self.last_valid_mid = (book_check["best_bid"] + book_check["best_ask"]) / 2.0
                 mins = time_remaining // 60
                 secs = time_remaining % 60
                 print(colored(
@@ -1943,6 +2124,7 @@ class CVDMarketMaker:
             book = get_order_book(self.up_token_id)
             if not book:
                 print(colored("   ⚠️ No orderbook, retrying...", "yellow"))
+                self.prev_book = None  # prevent stale sweep detection
                 time.sleep(5)
                 continue
 
@@ -1950,15 +2132,21 @@ class CVDMarketMaker:
             if PAPER_MODE and self.current_bid > 0:
                 self._check_paper_fills(book)
 
+            # Store book for next iteration's sweep detection
+            self.prev_book = book
+
             # Refresh quotes (recalculate with updated inventory + CVD)
             self._refresh_quotes(book)
+
+            # Update last valid mid for end-of-cycle mark
+            self.last_valid_mid = (book["best_bid"] + book["best_ask"]) / 2.0
 
             # Print status line
             mins = time_remaining // 60
             secs = time_remaining % 60
             btc_price = self.feed.get_last_price()
             total, buys, sells = self.inventory.get_fill_count()
-            pnl = self.inventory.get_pnl((book["best_bid"] + book["best_ask"]) / 2.0)
+            pnl = self.inventory.get_pnl(self.last_valid_mid)
 
             skew_arrow = "↑" if self.current_cvd_skew > 0.001 else (
                 "↓" if self.current_cvd_skew < -0.001 else "→"
