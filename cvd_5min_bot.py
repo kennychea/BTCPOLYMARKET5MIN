@@ -144,6 +144,7 @@ MM_ORDER_SIZE = int(os.getenv("MM_ORDER_SIZE", "10"))          # shares per side
 MM_MAX_INVENTORY = int(os.getenv("MM_MAX_INVENTORY", "50"))    # max net position (shares)
 MM_MAX_CVD_SKEW = float(os.getenv("MM_MAX_CVD_SKEW", "0.02")) # max CVD-derived price shift
 MM_NEUTRAL_ONLY = os.getenv("MM_NEUTRAL_ONLY", "false").lower() == "true"  # gate: skip non-NEUTRAL signals
+CVD_INVERT_SIGNAL = os.getenv("CVD_INVERT_SIGNAL", "false").lower() == "true"  # flip direction returned by check_cvd_signal (stink paper validation harness)
 MM_REFRESH_INTERVAL = int(os.getenv("MM_REFRESH_INTERVAL", "10"))  # seconds between quote refreshes
 MM_STOP_QUOTING_SEC = 30                                       # stop quoting N sec before market end
 MM_LOG_FILE = os.path.join(DATA_DIR, "mm_paper_trades.csv")
@@ -522,7 +523,16 @@ def check_cvd_signal(feed: BinanceCVDFeed) -> tuple:
             print(colored(f"   ⚠️ Best = {best[0]} but confirmation says {confirm_direction}, skipping!", "yellow"))
             return None, None, ""
 
-    return best[0], best[1], best[2]
+    # Stink paper validation harness — hypothesis test that CVD signal is
+    # anti-correlated with Polymarket outcomes. When CVD_INVERT_SIGNAL=true,
+    # flip only the bet target; leave signal_type label intact so audit logs
+    # still show the original divergence classification.
+    direction_out = best[0]
+    if CVD_INVERT_SIGNAL and direction_out == "UP":
+        direction_out = "DOWN"
+    elif CVD_INVERT_SIGNAL and direction_out == "DOWN":
+        direction_out = "UP"
+    return direction_out, best[1], best[2]
 
 
 # ============================================================================
