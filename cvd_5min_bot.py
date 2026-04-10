@@ -801,11 +801,13 @@ def get_market_info(market_ts: int) -> dict | None:
 
             neg_risk = market.get("negRisk", False)
             question = event.get("title", market.get("question", market_slug))
+            condition_id = market.get("conditionId", "")
 
             print(colored(f"   ✅ Found market: {question}", "green"))
 
             return {
                 "market_id": market_id,
+                "condition_id": condition_id,
                 "up_token_id": tokens[up_idx],
                 "down_token_id": tokens[down_idx],
                 "question": question,
