@@ -5,7 +5,6 @@ about the strategy's negative edge. Deterministic, cheap, parallelizable.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Iterator
 
 import pandas as pd
@@ -31,25 +30,31 @@ def iter_cycles(df: pd.DataFrame) -> Iterator[tuple[int, pd.DataFrame]]:
 def cycle_cash(cycle_rows: pd.DataFrame) -> float:
     """Compute total cash flow for one cycle (fills + rebates + settlement).
 
-    Matches paper_dashboard.compute_portfolio accounting.
-    Returns ~0 for flat cycles with no SETTLE row.
+    Mirrors paper_dashboard.compute_portfolio's BUY/SELL/SETTLE accounting
+    with a running net_position, so SETTLE price is applied to whatever
+    net position accrued from fills *preceding* the SETTLE row (matching
+    the dashboard's line-by-line iteration order).
+
+    For cycles without a SETTLE row, returns only the BUY/SELL cash flow:
+    realized rebates plus any spread captured when the bot opened and
+    closed positions within the cycle. This is NOT "zero" — a market
+    maker that bought at 0.49 and sold at 0.51 realizes +0.02 per unit
+    of volume even in a "flat" cycle.
     """
     cash = 0.0
+    net = 0
     for _, row in cycle_rows.iterrows():
         if row["side"] == "BUY":
             notional = row["price"] * row["size"]
-            rebate = notional * MAKER_REBATE_RATE
-            cash += -notional + rebate
+            cash += -notional + notional * MAKER_REBATE_RATE
+            net += int(row["size"])
         elif row["side"] == "SELL":
             notional = row["price"] * row["size"]
-            rebate = notional * MAKER_REBATE_RATE
-            cash += notional + rebate
+            cash += notional + notional * MAKER_REBATE_RATE
+            net -= int(row["size"])
         elif row["side"] == "SETTLE":
-            fills = cycle_rows[cycle_rows["side"].isin(["BUY", "SELL"])]
-            net = 0
-            for _, f in fills.iterrows():
-                net += int(f["size"]) if f["side"] == "BUY" else -int(f["size"])
             cash += net * row["price"]
+            net = 0
     return cash
 
 
