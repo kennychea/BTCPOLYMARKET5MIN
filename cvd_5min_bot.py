@@ -976,45 +976,108 @@ def log_paper_signal(market_ts: int, signal_type: str, direction: str, detail: s
     print(colored("   📝 Paper signal logged", "green"))
 
 
-def resolve_paper_outcome(market_ts: int, feed: BinanceCVDFeed):
+def resolve_paper_outcome(market_ts: int, feed: BinanceCVDFeed, filled: bool = False):
+    """After a market cycle ends, write all three outcome columns.
+
+    Sources:
+      1. Binance perp (feed.get_last_price()) — continuity with old schema
+      2. Binance spot (truth_sources.fetch_binance_spot_price)
+      3. Polymarket Gamma resolvedPrice (truth_sources.fetch_polymarket_resolution)
+
+    Only rows where signal_correct_polymarket is "" or "PENDING" are
+    touched — already-resolved YES/NO rows are immutable. Passing
+    filled=True marks the row as a filled stink bid (contributes to the
+    gate); filled=False keeps the row in the log but excludes it from
+    the gate via paper_gate.evaluate().
     """
-    After a market cycle ends, check BTC price now vs at signal time.
-    Update the paper log with the actual outcome.
-    """
+    import truth_sources
+
     if not os.path.exists(PAPER_LOG_FILE):
         return
 
     df = pd.read_csv(PAPER_LOG_FILE)
-    df["market_outcome"] = df["market_outcome"].fillna("")
-    df["signal_correct"] = df["signal_correct"].fillna("")
-    mask = (df["market_ts"] == market_ts) & (df["market_outcome"] == "")
+    # Ensure all new-schema columns exist and are string-typed where needed
+    for col in ("outcome_binance_perp", "outcome_binance_spot", "outcome_polymarket",
+                "signal_correct_binance_perp", "signal_correct_binance_spot",
+                "signal_correct_polymarket"):
+        if col not in df.columns:
+            df[col] = ""
+        df[col] = df[col].fillna("").astype(str)
+    if "filled" not in df.columns:
+        df["filled"] = False
+
+    # Re-resolve any row matching this market_ts that is still unresolved
+    # OR whose Polymarket state is PENDING.
+    mask = (df["market_ts"] == market_ts) & (
+        (df["signal_correct_polymarket"].isin(["", "PENDING"]))
+    )
     if not mask.any():
         return
 
-    btc_now = feed.get_last_price()
-    if btc_now <= 0:
-        return
-
     for idx in df[mask].index:
-        btc_at_signal = df.loc[idx, "btc_price_at_signal"]
-        if btc_at_signal <= 0:
-            continue
-
-        price_change = ((btc_now - btc_at_signal) / btc_at_signal) * 100
-        actual_outcome = "UP" if btc_now > btc_at_signal else "DOWN"
         predicted = df.loc[idx, "direction"]
-        correct = "YES" if predicted == actual_outcome else "NO"
+        btc_at_signal = df.loc[idx, "btc_price_at_signal"]
 
-        df.loc[idx, "btc_price_at_close"] = round(btc_now, 2)
-        df.loc[idx, "market_outcome"] = actual_outcome
-        df.loc[idx, "signal_correct"] = correct
-        df.loc[idx, "price_change_pct"] = round(price_change, 4)
+        # Mark filled status from caller
+        df.loc[idx, "filled"] = bool(filled)
 
-        emoji = "✅" if correct == "YES" else "❌"
+        # ── Source 1: Binance perp via feed ──
+        btc_now = feed.get_last_price() if feed else 0.0
+        if btc_now > 0 and btc_at_signal > 0:
+            actual_perp = "UP" if btc_now > btc_at_signal else "DOWN"
+            price_change = ((btc_now - btc_at_signal) / btc_at_signal) * 100
+            df.loc[idx, "btc_price_at_close"] = round(btc_now, 2)
+            df.loc[idx, "outcome_binance_perp"] = actual_perp
+            df.loc[idx, "signal_correct_binance_perp"] = "YES" if predicted == actual_perp else "NO"
+            df.loc[idx, "price_change_pct"] = round(price_change, 4)
+        else:
+            df.loc[idx, "outcome_binance_perp"] = "UNKNOWN"
+            df.loc[idx, "signal_correct_binance_perp"] = "UNKNOWN"
+
+        # ── Source 2: Binance spot via Klines REST ──
+        spot_close = truth_sources.fetch_binance_spot_price(int(market_ts) + 300)
+        if spot_close is not None and btc_at_signal > 0:
+            actual_spot = "UP" if spot_close > btc_at_signal else "DOWN"
+            df.loc[idx, "outcome_binance_spot"] = actual_spot
+            df.loc[idx, "signal_correct_binance_spot"] = "YES" if predicted == actual_spot else "NO"
+        else:
+            df.loc[idx, "outcome_binance_spot"] = "UNKNOWN"
+            df.loc[idx, "signal_correct_binance_spot"] = "UNKNOWN"
+
+        # ── Source 3: Polymarket Gamma (primary, drives gate) ──
+        condition_id = str(df.loc[idx, "condition_id"] or "")
+        if condition_id:
+            poly_outcome = truth_sources.fetch_polymarket_resolution(condition_id)
+        else:
+            poly_outcome = None
+
+        if poly_outcome == "PENDING":
+            df.loc[idx, "outcome_polymarket"] = "PENDING"
+            df.loc[idx, "signal_correct_polymarket"] = "PENDING"
+        elif poly_outcome in ("UP", "DOWN"):
+            df.loc[idx, "outcome_polymarket"] = poly_outcome
+            df.loc[idx, "signal_correct_polymarket"] = "YES" if predicted == poly_outcome else "NO"
+        else:
+            df.loc[idx, "outcome_polymarket"] = "UNKNOWN"
+            df.loc[idx, "signal_correct_polymarket"] = "UNKNOWN"
+
+        # Terminal console print
+        poly_state = df.loc[idx, "signal_correct_polymarket"]
+        if poly_state == "YES":
+            emoji, color = "✅", "green"
+        elif poly_state == "NO":
+            emoji, color = "❌", "red"
+        elif poly_state == "PENDING":
+            emoji, color = "⏳", "yellow"
+        else:
+            emoji, color = "❓", "white"
+
         print(colored(
-            f"   {emoji} PAPER RESULT: Predicted {predicted} | Actual {actual_outcome} | "
-            f"BTC {btc_at_signal:,.1f} → {btc_now:,.1f} ({price_change:+.3f}%)",
-            "green" if correct == "YES" else "red",
+            f"   {emoji} PAPER RESULT: Predicted {predicted} | "
+            f"Polymarket={df.loc[idx, 'outcome_polymarket']} "
+            f"Spot={df.loc[idx, 'outcome_binance_spot']} "
+            f"Perp={df.loc[idx, 'outcome_binance_perp']}",
+            color,
         ))
 
     df.to_csv(PAPER_LOG_FILE, index=False)
@@ -1696,9 +1759,10 @@ class CVDStinkBot:
                         self.stink_bid_shares, "", 0, 0, "TIME_EXPIRED",
                         "Market ended before fill",
                     )
-                # Resolve paper outcome
+                # Resolve paper outcome — pass filled state so the gate
+                # excludes unfilled stink bids.
                 if PAPER_MODE and self.signal_fired:
-                    resolve_paper_outcome(market_ts, self.feed)
+                    resolve_paper_outcome(market_ts, self.feed, filled=self.poly_filled)
                 break
 
             # Too little time left, cancel stink bid

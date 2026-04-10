@@ -113,78 +113,230 @@ class TestLogPaperSignal:
 # ── resolve_paper_outcome ────────────────────────────────────────────────
 
 class TestResolvePaperOutcome:
-    def _seed_signal(self, market_ts: int, direction: str, btc_price: float):
-        """Helper: log a paper signal that hasn't been resolved yet."""
-        bot.log_paper_signal(market_ts, "BULLISH_DIV", direction, "test", 0.45, btc_price, "slug")
+    def _seed(self, market_ts, direction, btc_price, condition_id="0xabc", shares=10,
+              stink_price=0.45):
+        bot.log_paper_signal(
+            market_ts=market_ts,
+            signal_type="BULLISH_DIV",
+            direction=direction,
+            detail="test",
+            stink_price=stink_price,
+            btc_price_at_signal=btc_price,
+            market_slug="slug",
+            condition_id=condition_id,
+            shares=shares,
+            direction_original=direction,
+            invert_flag=False,
+        )
 
-    def test_correct_up_prediction(self):
-        """Signal predicted UP, BTC went up → signal_correct = YES."""
-        self._seed_signal(1000, "UP", 84000.0)
+    def test_resolves_all_three_outcome_columns_up(self, monkeypatch):
+        """BTC moves up, Polymarket returns UP, spot returns 84100 — all three agree."""
+        self._seed(1000, "UP", 84000.0)
         feed = FakeFeed(84100.0)
-        bot.resolve_paper_outcome(1000, feed)
+
+        monkeypatch.setattr(
+            "truth_sources.fetch_binance_spot_price",
+            lambda ts, timeout_sec=5.0: 84105.0,
+        )
+        monkeypatch.setattr(
+            "truth_sources.fetch_polymarket_resolution",
+            lambda cid, timeout_sec=5.0: "UP",
+        )
+
+        bot.resolve_paper_outcome(1000, feed, filled=True)
 
         df = pd.read_csv(bot.PAPER_LOG_FILE)
-        assert df.iloc[0]["signal_correct"] == "YES"
-        assert df.iloc[0]["market_outcome"] == "UP"
-        assert df.iloc[0]["btc_price_at_close"] == 84100.0
+        row = df.iloc[0]
+        assert row["outcome_binance_perp"] == "UP"
+        assert row["signal_correct_binance_perp"] == "YES"
+        assert row["outcome_binance_spot"] == "UP"
+        assert row["signal_correct_binance_spot"] == "YES"
+        assert row["outcome_polymarket"] == "UP"
+        assert row["signal_correct_polymarket"] == "YES"
+        assert bool(row["filled"]) is True
+        assert row["btc_price_at_close"] == 84100.0
 
-    def test_correct_down_prediction(self):
-        """Signal predicted DOWN, BTC went down → signal_correct = YES."""
-        self._seed_signal(2000, "DOWN", 84000.0)
+    def test_polymarket_pending_keeps_row_reevaluable(self, monkeypatch):
+        """If Polymarket returns PENDING, the row is logged and re-runnable."""
+        self._seed(2000, "UP", 84000.0)
+        feed = FakeFeed(84100.0)
+
+        monkeypatch.setattr(
+            "truth_sources.fetch_binance_spot_price",
+            lambda ts, timeout_sec=5.0: 84110.0,
+        )
+        monkeypatch.setattr(
+            "truth_sources.fetch_polymarket_resolution",
+            lambda cid, timeout_sec=5.0: "PENDING",
+        )
+
+        bot.resolve_paper_outcome(2000, feed, filled=True)
+
+        df = pd.read_csv(bot.PAPER_LOG_FILE)
+        row = df.iloc[0]
+        assert row["outcome_polymarket"] == "PENDING"
+        assert row["signal_correct_polymarket"] == "PENDING"
+        assert row["outcome_binance_perp"] == "UP"  # other sources still filled in
+        assert row["outcome_binance_spot"] == "UP"
+
+    def test_polymarket_none_writes_unknown(self, monkeypatch):
+        """Transient HTTP failure → UNKNOWN, no retry."""
+        self._seed(3000, "UP", 84000.0)
+        feed = FakeFeed(84100.0)
+
+        monkeypatch.setattr(
+            "truth_sources.fetch_binance_spot_price",
+            lambda ts, timeout_sec=5.0: 84110.0,
+        )
+        monkeypatch.setattr(
+            "truth_sources.fetch_polymarket_resolution",
+            lambda cid, timeout_sec=5.0: None,
+        )
+
+        bot.resolve_paper_outcome(3000, feed, filled=True)
+
+        df = pd.read_csv(bot.PAPER_LOG_FILE)
+        row = df.iloc[0]
+        assert row["outcome_polymarket"] == "UNKNOWN"
+        assert row["signal_correct_polymarket"] == "UNKNOWN"
+
+    def test_binance_spot_none_writes_unknown_for_spot_only(self, monkeypatch):
+        """Spot fetch fails but Polymarket still works — Polymarket drives gate."""
+        self._seed(4000, "UP", 84000.0)
+        feed = FakeFeed(84100.0)
+
+        monkeypatch.setattr(
+            "truth_sources.fetch_binance_spot_price",
+            lambda ts, timeout_sec=5.0: None,
+        )
+        monkeypatch.setattr(
+            "truth_sources.fetch_polymarket_resolution",
+            lambda cid, timeout_sec=5.0: "UP",
+        )
+
+        bot.resolve_paper_outcome(4000, feed, filled=True)
+
+        df = pd.read_csv(bot.PAPER_LOG_FILE)
+        row = df.iloc[0]
+        assert row["outcome_binance_spot"] == "UNKNOWN"
+        assert row["signal_correct_binance_spot"] == "UNKNOWN"
+        assert row["outcome_polymarket"] == "UP"
+        assert row["signal_correct_polymarket"] == "YES"
+
+    def test_wrong_direction_marked_no(self, monkeypatch):
+        """Predicted UP, Polymarket says DOWN → signal_correct_polymarket = NO."""
+        self._seed(5000, "UP", 84000.0)
         feed = FakeFeed(83900.0)
-        bot.resolve_paper_outcome(2000, feed)
+
+        monkeypatch.setattr(
+            "truth_sources.fetch_binance_spot_price",
+            lambda ts, timeout_sec=5.0: 83890.0,
+        )
+        monkeypatch.setattr(
+            "truth_sources.fetch_polymarket_resolution",
+            lambda cid, timeout_sec=5.0: "DOWN",
+        )
+
+        bot.resolve_paper_outcome(5000, feed, filled=True)
 
         df = pd.read_csv(bot.PAPER_LOG_FILE)
-        assert df.iloc[0]["signal_correct"] == "YES"
-        assert df.iloc[0]["market_outcome"] == "DOWN"
+        row = df.iloc[0]
+        assert row["signal_correct_polymarket"] == "NO"
 
-    def test_wrong_prediction(self):
-        """Signal predicted UP but BTC went down → signal_correct = NO."""
-        self._seed_signal(3000, "UP", 84000.0)
-        feed = FakeFeed(83800.0)
-        bot.resolve_paper_outcome(3000, feed)
+    def test_filled_flag_propagates(self, monkeypatch):
+        """When the bot passes filled=False, the row marks filled=False."""
+        self._seed(6000, "UP", 84000.0)
+        feed = FakeFeed(84100.0)
+
+        monkeypatch.setattr(
+            "truth_sources.fetch_binance_spot_price",
+            lambda ts, timeout_sec=5.0: 84105.0,
+        )
+        monkeypatch.setattr(
+            "truth_sources.fetch_polymarket_resolution",
+            lambda cid, timeout_sec=5.0: "UP",
+        )
+
+        bot.resolve_paper_outcome(6000, feed, filled=False)
 
         df = pd.read_csv(bot.PAPER_LOG_FILE)
-        assert df.iloc[0]["signal_correct"] == "NO"
-        assert df.iloc[0]["market_outcome"] == "DOWN"
+        row = df.iloc[0]
+        assert bool(row["filled"]) is False
 
-    def test_price_change_pct_calculated(self):
-        """Price change % is correctly computed."""
-        self._seed_signal(4000, "UP", 80000.0)
-        feed = FakeFeed(80100.0)
-        bot.resolve_paper_outcome(4000, feed)
+    def test_pending_retries_next_cycle(self, monkeypatch):
+        """A row with PENDING signal_correct_polymarket is re-resolved on next call."""
+        self._seed(7000, "UP", 84000.0)
+        feed = FakeFeed(84100.0)
+
+        # First call: Polymarket returns PENDING
+        monkeypatch.setattr(
+            "truth_sources.fetch_binance_spot_price",
+            lambda ts, timeout_sec=5.0: 84105.0,
+        )
+        monkeypatch.setattr(
+            "truth_sources.fetch_polymarket_resolution",
+            lambda cid, timeout_sec=5.0: "PENDING",
+        )
+        bot.resolve_paper_outcome(7000, feed, filled=True)
+
+        # Second call (next cycle): Polymarket now resolved
+        monkeypatch.setattr(
+            "truth_sources.fetch_polymarket_resolution",
+            lambda cid, timeout_sec=5.0: "UP",
+        )
+        bot.resolve_paper_outcome(7000, feed, filled=True)
 
         df = pd.read_csv(bot.PAPER_LOG_FILE)
-        expected_pct = round(((80100.0 - 80000.0) / 80000.0) * 100, 4)
-        assert df.iloc[0]["price_change_pct"] == pytest.approx(expected_pct)
+        row = df.iloc[0]
+        assert row["outcome_polymarket"] == "UP"
+        assert row["signal_correct_polymarket"] == "YES"
+
+    def test_skips_already_resolved_non_pending(self, monkeypatch):
+        """A row with signal_correct_polymarket in {YES,NO} is not re-touched."""
+        self._seed(8000, "UP", 84000.0)
+        feed = FakeFeed(84100.0)
+
+        monkeypatch.setattr(
+            "truth_sources.fetch_binance_spot_price",
+            lambda ts, timeout_sec=5.0: 84105.0,
+        )
+        monkeypatch.setattr(
+            "truth_sources.fetch_polymarket_resolution",
+            lambda cid, timeout_sec=5.0: "UP",
+        )
+        bot.resolve_paper_outcome(8000, feed, filled=True)
+
+        # A second call — even with a different Polymarket answer — must NOT overwrite
+        monkeypatch.setattr(
+            "truth_sources.fetch_polymarket_resolution",
+            lambda cid, timeout_sec=5.0: "DOWN",
+        )
+        bot.resolve_paper_outcome(8000, feed, filled=True)
+
+        df = pd.read_csv(bot.PAPER_LOG_FILE)
+        assert df.iloc[0]["outcome_polymarket"] == "UP"
+        assert df.iloc[0]["signal_correct_polymarket"] == "YES"
 
     def test_no_file_is_noop(self):
-        """No crash if CSV doesn't exist."""
         feed = FakeFeed(84000.0)
-        bot.resolve_paper_outcome(999, feed)
+        bot.resolve_paper_outcome(999, feed, filled=False)  # no crash
 
-    def test_skips_already_resolved(self):
-        """Doesn't overwrite signals that were already resolved."""
-        self._seed_signal(5000, "UP", 84000.0)
-        feed1 = FakeFeed(84100.0)
-        bot.resolve_paper_outcome(5000, feed1)
-
-        feed2 = FakeFeed(83000.0)
-        bot.resolve_paper_outcome(5000, feed2)
-
-        df = pd.read_csv(bot.PAPER_LOG_FILE)
-        assert df.iloc[0]["btc_price_at_close"] == 84100.0
-
-    def test_zero_feed_price_skips(self):
-        """If feed returns 0 price, don't resolve."""
-        self._seed_signal(6000, "UP", 84000.0)
+    def test_zero_feed_price_skips(self, monkeypatch):
+        self._seed(9000, "UP", 84000.0)
         feed = FakeFeed(0.0)
-        bot.resolve_paper_outcome(6000, feed)
-
+        monkeypatch.setattr(
+            "truth_sources.fetch_binance_spot_price",
+            lambda ts, timeout_sec=5.0: None,
+        )
+        monkeypatch.setattr(
+            "truth_sources.fetch_polymarket_resolution",
+            lambda cid, timeout_sec=5.0: None,
+        )
+        bot.resolve_paper_outcome(9000, feed, filled=False)
         df = pd.read_csv(bot.PAPER_LOG_FILE)
-        # signal_correct should still be empty (NaN or "")
-        val = df.iloc[0]["signal_correct"]
-        assert pd.isna(val) or val == ""
+        row = df.iloc[0]
+        # Nothing resolvable — all three outcome columns should be UNKNOWN or blank
+        assert row["outcome_binance_perp"] in ("", "UNKNOWN") or pd.isna(row["outcome_binance_perp"])
 
 
 # ── print_paper_summary ──────────────────────────────────────────────────
