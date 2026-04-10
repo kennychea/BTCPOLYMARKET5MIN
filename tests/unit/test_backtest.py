@@ -146,3 +146,57 @@ class TestDominantSignal:
              "inventory_after": 0, "cvd_skew": 0.0, "market_ts": 1, "timestamp": "t2", "market_slug": "s"},
         ])
         assert backtest.dominant_signal(rows) == "BULLISH"
+
+
+class TestExperimentBaseline:
+    def test_reproduces_dashboard_cash(self):
+        """experiment_baseline must reproduce dash['cash'] (the clean total)."""
+        df = backtest.load_fills(BASELINE_CSV)
+        result = backtest.experiment_baseline(df)
+
+        import sys
+        sys.path.insert(0, ".")
+        from paper_dashboard import compute_portfolio
+        dash = compute_portfolio(df)
+
+        # See the extensive comment in TestCycleCash on why we target `cash`
+        # and not `settled_pnl` (paper_dashboard.py:88-103 leak-forward bug).
+        assert abs(result.total_pnl - dash["cash"]) < 0.01, \
+            f"baseline={result.total_pnl:.4f}, dash_cash={dash['cash']:.4f}"
+
+    def test_alignment_adverse_in_baseline(self):
+        """The baseline session had clearly adverse alignment (inv vs outcome).
+
+        Baseline stats (verified from dashboard): 822 rows, 81 cycles,
+        64 settled, 16 won / 48 lost (dashboard's leaky counters) which
+        corresponds to a clean inventory-sign alignment ≤ 35%.
+        """
+        df = backtest.load_fills(BASELINE_CSV)
+        result = backtest.experiment_baseline(df)
+        settled = result.alignment_good + result.alignment_bad
+        assert 55 <= settled <= 70, f"settled count out of expected range: {settled}"
+        assert result.alignment_rate < 0.35, \
+            f"alignment higher than expected: {result.alignment_rate:.4f}"
+
+
+class TestExperimentsSmoke:
+    def test_all_experiments_return_finite(self):
+        df = backtest.load_fills(BASELINE_CSV)
+        for fn in (backtest.experiment_neutral_only,
+                   backtest.experiment_forced_flatten,
+                   backtest.experiment_half_cap):
+            result = fn(df)
+            assert result.cycles_kept > 0, f"{result.name}: no cycles kept"
+            # Finite check (not NaN, not inf)
+            assert result.total_pnl == result.total_pnl, f"{result.name}: NaN total"
+            assert -10000 < result.total_pnl < 10000, \
+                f"{result.name}: unreasonable total {result.total_pnl}"
+
+    def test_experiment_result_to_dict_roundtrip(self):
+        """ExperimentResult.to_dict must serialize all fields."""
+        df = backtest.load_fills(BASELINE_CSV)
+        result = backtest.experiment_baseline(df)
+        d = result.to_dict()
+        expected = {"name", "total_pnl", "cycles_kept", "cycles_dropped",
+                    "alignment_good", "alignment_bad", "alignment_rate", "per_cycle_mean"}
+        assert set(d.keys()) == expected
