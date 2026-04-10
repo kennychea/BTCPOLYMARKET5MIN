@@ -28,7 +28,7 @@ def paper_tmp_dir(tmp_path, monkeypatch):
 # ── log_paper_signal ─────────────────────────────────────────────────────
 
 class TestLogPaperSignal:
-    def test_creates_csv_with_correct_columns(self):
+    def test_creates_csv_with_new_schema_columns(self):
         bot.log_paper_signal(
             market_ts=1000000,
             signal_type="BULLISH_DIV",
@@ -37,14 +37,23 @@ class TestLogPaperSignal:
             stink_price=0.45,
             btc_price_at_signal=84000.0,
             market_slug="btc-updown-5m-1000000",
+            condition_id="0xabc",
+            shares=11,
+            direction_original="UP",
+            invert_flag=False,
         )
         assert os.path.exists(bot.PAPER_LOG_FILE)
         df = pd.read_csv(bot.PAPER_LOG_FILE)
         assert len(df) == 1
         expected_cols = {
-            "timestamp", "market_ts", "market_slug", "signal_type", "direction",
-            "detail", "stink_price", "btc_price_at_signal", "btc_price_at_close",
-            "market_outcome", "signal_correct", "price_change_pct",
+            "timestamp", "market_ts", "market_slug", "condition_id",
+            "signal_type", "direction", "direction_original", "invert_flag",
+            "detail", "stink_price", "shares",
+            "btc_price_at_signal", "btc_price_at_close",
+            "outcome_binance_perp", "outcome_binance_spot", "outcome_polymarket",
+            "signal_correct_binance_perp", "signal_correct_binance_spot",
+            "signal_correct_polymarket",
+            "price_change_pct", "filled",
         }
         assert set(df.columns) == expected_cols
 
@@ -52,27 +61,49 @@ class TestLogPaperSignal:
         bot.log_paper_signal(
             market_ts=1000000,
             signal_type="STRONG_BEAR",
-            direction="DOWN",
+            direction="UP",              # flipped from DOWN
             detail="strong selling",
             stink_price=0.52,
             btc_price_at_signal=85000.5,
             market_slug="btc-updown-5m-1000000",
+            condition_id="0xdeadbeef",
+            shares=9,
+            direction_original="DOWN",
+            invert_flag=True,
         )
         df = pd.read_csv(bot.PAPER_LOG_FILE)
         row = df.iloc[0]
         assert row["market_ts"] == 1000000
         assert row["signal_type"] == "STRONG_BEAR"
-        assert row["direction"] == "DOWN"
+        assert row["direction"] == "UP"
+        assert row["direction_original"] == "DOWN"
+        assert bool(row["invert_flag"]) is True
         assert row["stink_price"] == 0.52
+        assert row["shares"] == 9
+        assert row["condition_id"] == "0xdeadbeef"
         assert row["btc_price_at_signal"] == 85000.5
         assert row["btc_price_at_close"] == 0.0
-        # Empty strings are read as NaN by pandas — check for that
-        assert pd.isna(row["market_outcome"]) or row["market_outcome"] == ""
-        assert pd.isna(row["signal_correct"]) or row["signal_correct"] == ""
+        assert bool(row["filled"]) is False
+        # Outcome columns empty initially
+        for col in ("outcome_binance_perp", "outcome_binance_spot", "outcome_polymarket",
+                    "signal_correct_binance_perp", "signal_correct_binance_spot",
+                    "signal_correct_polymarket"):
+            val = row[col]
+            assert pd.isna(val) or val == ""
 
     def test_appends_to_existing(self):
-        bot.log_paper_signal(1000, "BULLISH_DIV", "UP", "first", 0.4, 84000.0, "slug-1")
-        bot.log_paper_signal(2000, "BEARISH_DIV", "DOWN", "second", 0.5, 84100.0, "slug-2")
+        bot.log_paper_signal(
+            market_ts=1000, signal_type="BULLISH_DIV", direction="UP",
+            detail="first", stink_price=0.4, btc_price_at_signal=84000.0,
+            market_slug="slug-1", condition_id="0x1", shares=12,
+            direction_original="UP", invert_flag=False,
+        )
+        bot.log_paper_signal(
+            market_ts=2000, signal_type="BEARISH_DIV", direction="DOWN",
+            detail="second", stink_price=0.5, btc_price_at_signal=84100.0,
+            market_slug="slug-2", condition_id="0x2", shares=10,
+            direction_original="DOWN", invert_flag=False,
+        )
         df = pd.read_csv(bot.PAPER_LOG_FILE)
         assert len(df) == 2
         assert df.iloc[0]["signal_type"] == "BULLISH_DIV"
@@ -164,11 +195,39 @@ class TestPrintPaperSummary:
         out = capsys.readouterr().out
         assert "No paper trades" in out
 
-    def test_with_resolved_data(self, capsys):
-        bot.log_paper_signal(1000, "BULLISH_DIV", "UP", "t1", 0.4, 84000.0, "s1")
-        bot.log_paper_signal(2000, "BEARISH_DIV", "DOWN", "t2", 0.5, 84100.0, "s2")
-        bot.resolve_paper_outcome(1000, FakeFeed(84100.0))  # correct
-        bot.resolve_paper_outcome(2000, FakeFeed(84200.0))  # wrong (predicted DOWN, went UP)
+    def test_with_resolved_data(self, capsys, monkeypatch):
+        # Write two rows directly — one YES, one NO — with new-schema columns.
+        df = pd.DataFrame([
+            {
+                "timestamp": "2026-04-10T12:00:00",
+                "market_ts": 1000, "market_slug": "s1", "condition_id": "0x1",
+                "signal_type": "BULLISH_DIV", "direction": "UP",
+                "direction_original": "UP", "invert_flag": False,
+                "detail": "t1", "stink_price": 0.4, "shares": 12,
+                "btc_price_at_signal": 84000.0, "btc_price_at_close": 84100.0,
+                "outcome_binance_perp": "UP", "outcome_binance_spot": "UP",
+                "outcome_polymarket": "UP",
+                "signal_correct_binance_perp": "YES",
+                "signal_correct_binance_spot": "YES",
+                "signal_correct_polymarket": "YES",
+                "price_change_pct": 0.12, "filled": True,
+            },
+            {
+                "timestamp": "2026-04-10T12:05:00",
+                "market_ts": 2000, "market_slug": "s2", "condition_id": "0x2",
+                "signal_type": "BEARISH_DIV", "direction": "DOWN",
+                "direction_original": "DOWN", "invert_flag": False,
+                "detail": "t2", "stink_price": 0.5, "shares": 10,
+                "btc_price_at_signal": 84100.0, "btc_price_at_close": 84200.0,
+                "outcome_binance_perp": "UP", "outcome_binance_spot": "UP",
+                "outcome_polymarket": "UP",
+                "signal_correct_binance_perp": "NO",
+                "signal_correct_binance_spot": "NO",
+                "signal_correct_polymarket": "NO",
+                "price_change_pct": 0.12, "filled": True,
+            },
+        ])
+        df.to_csv(bot.PAPER_LOG_FILE, index=False)
 
         bot.print_paper_summary()
         out = capsys.readouterr().out

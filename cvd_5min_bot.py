@@ -931,23 +931,39 @@ def print_trade_summary():
 # ============================================================================
 
 def log_paper_signal(market_ts: int, signal_type: str, direction: str, detail: str,
-                     stink_price: float, btc_price_at_signal: float, market_slug: str):
-    """Log paper trade signal for later outcome resolution."""
+                     stink_price: float, btc_price_at_signal: float, market_slug: str,
+                     condition_id: str = "", shares: int = 0,
+                     direction_original: str = "", invert_flag: bool = False):
+    """Log paper trade signal for later outcome resolution.
+
+    Writes one row with the new schema: three parallel outcome columns
+    (perp / spot / polymarket), filled flag, audit fields for direction
+    flip, and condition_id needed by fetch_polymarket_resolution.
+    """
     os.makedirs(DATA_DIR, exist_ok=True)
 
     new_row = pd.DataFrame([{
         "timestamp": datetime.now().isoformat(),
         "market_ts": market_ts,
         "market_slug": market_slug,
+        "condition_id": condition_id,
         "signal_type": signal_type,
         "direction": direction,
+        "direction_original": direction_original or direction,
+        "invert_flag": bool(invert_flag),
         "detail": detail,
         "stink_price": round(stink_price, 4),
+        "shares": int(shares),
         "btc_price_at_signal": round(btc_price_at_signal, 2),
         "btc_price_at_close": 0.0,
-        "market_outcome": "",
-        "signal_correct": "",
+        "outcome_binance_perp": "",
+        "outcome_binance_spot": "",
+        "outcome_polymarket": "",
+        "signal_correct_binance_perp": "",
+        "signal_correct_binance_spot": "",
+        "signal_correct_polymarket": "",
         "price_change_pct": 0.0,
+        "filled": False,
     }])
 
     if os.path.exists(PAPER_LOG_FILE):
@@ -1005,36 +1021,41 @@ def resolve_paper_outcome(market_ts: int, feed: BinanceCVDFeed):
 
 
 def print_paper_summary():
-    """Print accuracy stats from paper trading log."""
+    """Print accuracy stats from paper trading log (reads Polymarket column)."""
     if not os.path.exists(PAPER_LOG_FILE):
         print(colored("   📝 No paper trades yet", "yellow"))
         return
 
     df = pd.read_csv(PAPER_LOG_FILE)
-    resolved = df[df["signal_correct"].isin(["YES", "NO"])]
+    # Defensive: tolerate a pre-schema-migration file
+    if "signal_correct_polymarket" not in df.columns:
+        print(colored("   📝 Paper log uses old schema, skipping summary", "yellow"))
+        return
+
+    resolved = df[df["signal_correct_polymarket"].isin(["YES", "NO"])]
     if len(resolved) == 0:
         print(colored(f"   📝 {len(df)} paper signals logged, none resolved yet", "yellow"))
         return
 
     total = len(resolved)
-    correct = len(resolved[resolved["signal_correct"] == "YES"])
+    correct = len(resolved[resolved["signal_correct_polymarket"] == "YES"])
     accuracy = (correct / total) * 100
 
-    print(colored(f"\n   📝 Paper Trading Summary:", "cyan", attrs=["bold"]))
+    print(colored(f"\n   📝 Paper Trading Summary (Polymarket-resolved):", "cyan", attrs=["bold"]))
     print(colored(f"      Signals: {total} | Correct: {correct} | Wrong: {total - correct}", "white"))
     print(colored(f"      Accuracy: {accuracy:.1f}%", "green" if accuracy > 50 else "red", attrs=["bold"]))
 
     # Breakdown by signal type
     for sig_type in resolved["signal_type"].unique():
         subset = resolved[resolved["signal_type"] == sig_type]
-        sub_correct = len(subset[subset["signal_correct"] == "YES"])
+        sub_correct = len(subset[subset["signal_correct_polymarket"] == "YES"])
         sub_total = len(subset)
         sub_acc = (sub_correct / sub_total) * 100 if sub_total > 0 else 0
         print(colored(f"      {sig_type:<14}: {sub_correct}/{sub_total} ({sub_acc:.0f}%)", "white"))
 
-    # Average price change for correct vs wrong
-    correct_df = resolved[resolved["signal_correct"] == "YES"]
-    wrong_df = resolved[resolved["signal_correct"] == "NO"]
+    # Average price change for correct vs wrong (perp-derived price_change_pct)
+    correct_df = resolved[resolved["signal_correct_polymarket"] == "YES"]
+    wrong_df = resolved[resolved["signal_correct_polymarket"] == "NO"]
     if len(correct_df) > 0:
         avg_correct = correct_df["price_change_pct"].abs().mean()
         print(colored(f"      Avg move (correct): {avg_correct:.3f}%", "white"))
@@ -1780,6 +1801,17 @@ class CVDStinkBot:
 
                     # Log paper signal for outcome tracking
                     if PAPER_MODE:
+                        # direction_original = pre-flip direction from the raw signal.
+                        # When CVD_INVERT_SIGNAL=true, self.signal_direction is already
+                        # flipped — we infer the original by flipping it back for the
+                        # audit field.
+                        if CVD_INVERT_SIGNAL and self.signal_direction == "UP":
+                            direction_original = "DOWN"
+                        elif CVD_INVERT_SIGNAL and self.signal_direction == "DOWN":
+                            direction_original = "UP"
+                        else:
+                            direction_original = self.signal_direction or ""
+
                         log_paper_signal(
                             market_ts=market_ts,
                             signal_type=self.signal_type,
@@ -1788,6 +1820,10 @@ class CVDStinkBot:
                             stink_price=self.stink_bid_price,
                             btc_price_at_signal=self.feed.get_last_price(),
                             market_slug=self.market_info.get("slug", ""),
+                            condition_id=self.market_info.get("condition_id", ""),
+                            shares=self.stink_bid_shares,
+                            direction_original=direction_original,
+                            invert_flag=CVD_INVERT_SIGNAL,
                         )
                 else:
                     mins = time_remaining // 60
