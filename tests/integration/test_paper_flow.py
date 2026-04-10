@@ -1,4 +1,12 @@
-"""Integration test: synthetic paper_trades.csv → paper_gate.evaluate → sentinel."""
+"""Integration test: synthetic paper_trades.csv → paper_gate.evaluate → sentinel.
+
+Updated 2026-04-11 for hardened thresholds:
+  MIN_N_FOR_DECISION = 120
+  PASS_P_VALUE = 0.01
+  CRYPTO_FEE_RATE = 0.072 (symmetric curve; fees on both winners and losers)
+  KILL_WARMUP_WR = 0.50 for n in [30, 50)
+  KILL_TOTAL_LOSS = -50.0 dollar drawdown
+"""
 import json
 from datetime import datetime
 
@@ -35,18 +43,20 @@ def _fake_row(signal_correct_polymarket, market_ts, shares=10, stink_price=0.40)
 
 
 def test_synthetic_pass_flow(tmp_path):
-    """70 trades, 50 wins (71.4% winrate) at stink_price 0.40 → PASS.
+    """140 trades, 90 wins (64.3% winrate) at stink_price 0.40 → PASS.
 
-    Expected metrics:
-      wins=50, n=70, winrate=0.714
-      EV per win = 10 * (1 - 0.40) - 10 * 1 * 0.0315 = 6.0 - 0.315 = 5.685
-      EV per loss = 10 * (0 - 0.40) - 0 = -4.0
-      Mean EV = (50*5.685 + 20*(-4.0)) / 70 = (284.25 - 80) / 70 ≈ 2.918
-      p-value ≈ 0.00018 (very significant)
-    All four gates met → PASS.
+    Under hardened thresholds:
+      n = 140 >= MIN_N_FOR_DECISION (120) ✓
+      winrate = 0.643 >= PASS_WINRATE (0.58) ✓
+      p-value(90, 140, 0.5) ≈ 5e-4 <= PASS_P_VALUE (0.01) ✓
+
+    PnL sanity:
+      win  = 10*(1-0.4) - 10*0.072*0.4*0.6 = 6.0 - 0.1728 = 5.8272
+      loss = 10*(0-0.4) - 0.1728          = -4.1728
+      total = 90*5.8272 + 50*(-4.1728) = 524.45 - 208.64 = 315.81 > 0 (no dollar KILL)
     """
-    rows = [_fake_row("YES", market_ts=1_000_000 + i * 300) for i in range(50)]
-    rows += [_fake_row("NO", market_ts=1_020_000 + i * 300) for i in range(20)]
+    rows = [_fake_row("YES", market_ts=1_000_000 + i * 300) for i in range(90)]
+    rows += [_fake_row("NO", market_ts=1_100_000 + i * 300) for i in range(50)]
     df = pd.DataFrame(rows)
 
     sentinel_path = str(tmp_path / "paper_gate_status.json")
@@ -54,20 +64,26 @@ def test_synthetic_pass_flow(tmp_path):
     paper_gate.write_sentinel(status, sentinel_path)
 
     assert status.status == "PASS"
-    assert status.n == 70
-    assert status.winrate == pytest.approx(50 / 70, abs=1e-9)
-    assert status.p_value < 0.05
-    assert status.ev_per_trade > 0.20
+    assert status.n == 140
+    assert status.winrate == pytest.approx(90 / 140, abs=1e-9)
+    assert status.p_value < paper_gate.PASS_P_VALUE
+    assert status.ev_per_trade > 0.0
 
     # Sentinel round-trip
     with open(sentinel_path) as f:
         data = json.load(f)
     assert data["status"] == "PASS"
-    assert data["n"] == 70
+    assert data["n"] == 140
 
 
 def test_synthetic_kill_flow(tmp_path):
-    """40 trades, 8 wins (20% winrate) → KILL."""
+    """40 trades, 8 wins (20% winrate) → KILL.
+
+    At n=40 this sits in the warmup window [30, 50) and winrate 0.20 < 0.50,
+    so the warmup binomial KILL fires. Dollar-drawdown KILL would also fire
+    independently (total PnL ≈ -86.91 < -50.00), but whichever triggers first
+    gives the same verdict: KILL.
+    """
     rows = [_fake_row("YES", market_ts=2_000_000 + i * 300) for i in range(8)]
     rows += [_fake_row("NO", market_ts=2_020_000 + i * 300) for i in range(32)]
     df = pd.DataFrame(rows)
@@ -79,11 +95,19 @@ def test_synthetic_kill_flow(tmp_path):
 
 
 def test_synthetic_inconclusive_flow(tmp_path):
-    """n=65, winrate=0.55 (below PASS 0.58) → INCONCLUSIVE."""
-    rows = [_fake_row("YES", market_ts=3_000_000 + i * 300) for i in range(36)]
-    rows += [_fake_row("NO", market_ts=3_030_000 + i * 300) for i in range(29)]
+    """n=130, winrate=56.9% (just below PASS_WINRATE 0.58) → INCONCLUSIVE.
+
+    Under hardened thresholds:
+      n = 130 >= MIN_N_FOR_DECISION (120) ✓ (eligible for decision)
+      winrate = 74/130 = 0.569 < PASS_WINRATE (0.58) ✗ (PASS blocked)
+      winrate > KILL_WINRATE (0.45) (no KILL)
+      total PnL = 74*5.8272 + 56*(-4.1728) = 431.21 - 233.68 = 197.53 > -50 (no dollar KILL)
+    """
+    rows = [_fake_row("YES", market_ts=3_000_000 + i * 300) for i in range(74)]
+    rows += [_fake_row("NO", market_ts=3_100_000 + i * 300) for i in range(56)]
     df = pd.DataFrame(rows)
 
     status = paper_gate.evaluate(df)
     assert status.status == "INCONCLUSIVE"
-    assert status.n == 65
+    assert status.n == 130
+    assert status.winrate == pytest.approx(74 / 130, abs=1e-9)
